@@ -30,11 +30,12 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(html).toContain('id="claude-oauth-start"');
   expect(html).toContain('id="codex-oauth-start"');
   expect(html).toContain("/admin/claude/oauth/complete");
-  expect(response.headers.get("content-security-policy")).toMatch(/script-src 'nonce-[0-9a-f-]+'/);
+  expect(response.headers.get("content-security-policy")).toMatch(/script-src 'sha256-[A-Za-z0-9+/]+=*'/);
   expect(html).toContain("100%");
   expect(html).toContain("5h");
   expect(html).not.toContain("Quota exhausted"); // Rounded 100% does not override allowed=true.
-  for (const secret of ["a-access", "b-access", "a-refresh", "claude-token", "<script>"])
+  expect(html).not.toContain('<strong><script>alert("secret")</script></strong>');
+  for (const secret of ["a-access", "b-access", "a-refresh", "claude-token"])
     expect(html).not.toContain(secret);
   expect((await fetch(`${f.url}codex/accounts`)).status).toBe(401);
   expect((await fetch(`${f.url}v1/responses`, { method: "POST" })).status).toBe(401);

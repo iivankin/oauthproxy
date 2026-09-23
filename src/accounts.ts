@@ -163,10 +163,13 @@ export class Accounts {
         subscriptionType: profile?.organization.organization_type ?? null,
         rateLimitTier: profile?.organization.rate_limit_tier ?? null,
         seatTier: profile?.organization.seat_tier ?? null }; }
-      catch { return { ...safeAccount(account), usage: null, error: "Cannot load quota; account excluded from selection",
-        subscriptionType: profile?.organization.organization_type ?? null,
-        rateLimitTier: profile?.organization.rate_limit_tier ?? null,
-        seatTier: profile?.organization.seat_tier ?? null }; }
+      catch (error) {
+        console.warn(`Cannot load quota for ${account.id}: ${error instanceof Error ? error.message : "unknown error"}`);
+        return { ...safeAccount(account), usage: null, error: "Cannot load quota; account excluded from selection",
+          subscriptionType: profile?.organization.organization_type ?? null,
+          rateLimitTier: profile?.organization.rate_limit_tier ?? null,
+          seatTier: profile?.organization.seat_tier ?? null };
+      }
     }));
   }
 

@@ -1,8 +1,11 @@
+import { createHash } from "node:crypto";
 import type { Accounts } from "./accounts.ts";
 import type { Accounts as CodexAccounts } from "./codex/accounts.ts";
 import { dashboardAccounts, type DashboardAccount, type Quota } from "./dashboard-data.ts";
 import { dashboardScript } from "./dashboard-script.ts";
 import type { Stats } from "./stats.ts";
+
+const dashboardScriptHash = createHash("sha256").update(dashboardScript).digest("base64");
 
 const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 function date(value: string) {
@@ -22,7 +25,6 @@ function account(row: DashboardAccount) {
 }
 
 export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: Stats, key?: string, origin = "http://127.0.0.1:3000") {
-  const nonce = crypto.randomUUID();
   const { accounts, errors } = await dashboardAccounts(claude, codex);
   const counters = stats.snapshot();
   const sum = (key: "total" | "active" | "errors") => counters.reduce((n, row) => n + row[key], 0);
@@ -84,9 +86,9 @@ GET /codex/v1/models      GET /codex/accounts
 GET /codex/usage?account=&lt;id&gt;
 WS  /v1/responses?model=&lt;codex-model&gt;</code></pre>
 <footer><small>Since ${escape(date(stats.since.toISOString()))} · In memory · Per-account attempts<br>HTTP: completed 2xx streams, non-2xx / transport errors. WS: connections, not model turns. In-stream model errors are not counted.</small></footer>
-</main><script nonce="${nonce}">${dashboardScript}</script></body></html>`, { headers: {
+</main><script>${dashboardScript}</script></body></html>`, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": "no-store, no-transform",
-    "content-security-policy": `default-src 'none'; script-src 'nonce-${nonce}'; connect-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+    "content-security-policy": `default-src 'none'; script-src 'sha256-${dashboardScriptHash}'; connect-src 'self'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
     "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
   } });
 }
