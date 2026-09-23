@@ -29,4 +29,4 @@ bun test
 bun run build
 ```
 
-Client contracts and limitations: [Claude](CLIENT.md) · [Codex](CODEX.md).
+Client contracts and limitations: [Claude](docs/CLAUDE.md) · [Codex](docs/CODEX.md).
