@@ -14,6 +14,7 @@ const windowSchema = z.object({
   reset_at: z.number().finite().nullable().optional(),
   limit_window_seconds: z.number().positive().optional(),
 });
+const codexIdentitySchema = z.object({ email: z.string().email().optional() }).passthrough();
 
 function codexQuotas(usage: CodexUsage): Quota[] {
   const groups = [
@@ -56,6 +57,8 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts) 
       if (account.disabled) return row;
       try {
         const usage = await codex.usage(account.id);
+        const identity = codexIdentitySchema.safeParse(usage);
+        if (identity.success && identity.data.email) row.identity = identity.data.email;
         row.quotas = codexQuotas(usage);
         if (!usage.rate_limit) row.status = "Quota unavailable";
         else if (!usage.rate_limit.allowed) row.status = "Quota exhausted";

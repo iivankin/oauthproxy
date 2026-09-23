@@ -11,7 +11,7 @@ test("dashboard is public, escapes account metadata, and never exposes credentia
   const f = await setup();
   await f.accounts.store.update(data => { data.accounts[0]!.name = '<script>alert("secret")</script>'; });
   f.usage.set("Bearer a-access", { rate_limit: { allowed: true, limit_reached: false,
-    primary_window: { used_percent: 100, limit_window_seconds: 18000, reset_at: 1800000000 } } });
+    primary_window: { used_percent: 100, limit_window_seconds: 18000, reset_at: 1800000000 } }, email: "codex@test.invalid" });
   const response = await fetch(`${f.url}dashboard`);
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toContain("text/html");
@@ -20,6 +20,7 @@ test("dashboard is public, escapes account metadata, and never exposes credentia
   const html = await response.text();
   expect(html).toContain("&lt;script&gt;alert(&quot;secret&quot;)&lt;/script&gt;");
   expect(html).toContain("test@invalid");
+  expect(html).toContain("codex@test.invalid");
   expect(html).toContain("100%");
   expect(html).toContain("5h");
   expect(html).not.toContain("Quota exhausted"); // Rounded 100% does not override allowed=true.
