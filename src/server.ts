@@ -11,6 +11,13 @@ import { Stats } from "./stats.ts";
 import { dashboard } from "./dashboard.ts";
 import { AdminApi } from "./admin.ts";
 
+function publicOrigin(request: Request, url: URL) {
+  const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  return ["http", "https"].includes(forwardedProto ?? "") && forwardedHost
+    ? `${forwardedProto}://${forwardedHost}` : url.origin;
+}
+
 export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, key?: string,
   codex = new CodexAccounts(new CodexStore(), new CodexTransport())) {
   if (!["127.0.0.1", "localhost", "::1"].includes(hostname) && !key)
@@ -23,18 +30,17 @@ export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, k
     async fetch(request, server) {
       const url = new URL(request.url);
       const path = url.pathname;
+      const origin = publicOrigin(request, url);
       // Deliberately public; protect this route at the reverse proxy when exposing the server.
       if (path === "/dashboard" && request.method === "GET") {
-        const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
-        const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
-        const origin = ["http", "https"].includes(forwardedProto ?? "") && forwardedHost
-          ? `${forwardedProto}://${forwardedHost}` : url.origin;
         return dashboard(accounts, codex, stats, key, origin);
       }
       if (path.startsWith("/admin/") && !key)
         return proxyError(503, "Set PROXY_API_KEY to enable admin routes");
       if (!authorized(request, key)) return proxyError(401, "Invalid proxy API key");
-      if (request.headers.has("origin")) return proxyError(403, "Browser origins are not supported");
+      const browserOrigin = request.headers.get("origin");
+      if (browserOrigin && !(path.startsWith("/admin/") && browserOrigin === origin))
+        return proxyError(403, "Browser origins are not supported");
       try {
         if (path.startsWith("/admin/")) return await admin.handle(request);
         if (path === "/v1/responses") return request.method === "POST"

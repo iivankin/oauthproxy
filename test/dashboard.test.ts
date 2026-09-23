@@ -27,6 +27,10 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(html).toContain("Bearer local-key");
   expect(html).toContain("POST /v1/messages");
   expect(html).toContain("POST /v1/responses (SSE)");
+  expect(html).toContain('id="claude-oauth-start"');
+  expect(html).toContain('id="codex-oauth-start"');
+  expect(html).toContain("/admin/claude/oauth/complete");
+  expect(response.headers.get("content-security-policy")).toMatch(/script-src 'nonce-[0-9a-f-]+'/);
   expect(html).toContain("100%");
   expect(html).toContain("5h");
   expect(html).not.toContain("Quota exhausted"); // Rounded 100% does not override allowed=true.

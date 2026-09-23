@@ -14,6 +14,8 @@ test("admin OAuth routes require a configured and valid proxy API key", async ()
     headers: { "content-type": "application/json" }, body: "{}" })).status).toBe(401);
   expect((await post(`${f.url}admin/codex/oauth/start`, {}, { origin: "https://example.test" })).status).toBe(403);
   expect(f.calls.filter(call => call.path.includes("deviceauth"))).toHaveLength(0);
+  const sameOrigin = await post(`${f.url}admin/claude/oauth/start`, {}, { origin: new URL(f.url).origin });
+  expect(sameOrigin.status).toBe(201);
 
   const withoutKey = await setup({ key: null });
   const response = await fetch(`${withoutKey.url}admin/codex/oauth/start`, { method: "POST",
