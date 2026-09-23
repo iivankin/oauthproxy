@@ -15,7 +15,7 @@ test("dashboard is public, escapes account metadata, and never exposes credentia
   const response = await fetch(`${f.url}dashboard`);
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toContain("text/html");
-  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(response.headers.get("cache-control")).toBe("no-store, no-transform");
   expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
   const html = await response.text();
   expect(html).toContain("&lt;script&gt;alert(&quot;secret&quot;)&lt;/script&gt;");

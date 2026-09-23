@@ -53,7 +53,7 @@ ${accounts.map(account).join("") || '<tr><td colspan="4" class="empty">No accoun
 ${rows || '<tr><td colspan="8" class="empty">No traffic yet</td></tr>'}</tbody></table></div>
 <footer><small>Since ${escape(date(stats.since.toISOString()))} · In memory · Per-account attempts<br>HTTP: completed 2xx streams, non-2xx / transport errors. WS: connections, not model turns. In-stream model errors are not counted.</small></footer>
 </main></body></html>`, { headers: {
-    "content-type": "text/html; charset=utf-8", "cache-control": "no-store",
+    "content-type": "text/html; charset=utf-8", "cache-control": "no-store, no-transform",
     "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'",
     "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",
   } });
