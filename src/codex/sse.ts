@@ -2,12 +2,13 @@ import { z } from "zod";
 import { Accounts } from "./accounts.ts";
 import { responseHeaders } from "./headers.ts";
 import { proxyError } from "./proxy.ts";
+import { Stats } from "../stats.ts";
 
 const requestSchema = z.object({
   model: z.string().min(1), input: z.union([z.string(), z.array(z.unknown())]), stream: z.literal(true),
 }).passthrough();
 
-export async function streamResponses(accounts: Accounts, request: Request) {
+export async function streamResponses(accounts: Accounts, request: Request, stats = new Stats()) {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
     return proxyError(415, "Content-Type must be application/json");
   const body = await request.text();
@@ -22,8 +23,8 @@ export async function streamResponses(accounts: Accounts, request: Request) {
   signal.throwIfAborted();
   let response: Response;
   try {
-    response = await accounts.authorized(id, account =>
-      accounts.transport.responses(account, body, request.headers, sessionId, signal));
+    response = await stats.http("Codex", id, signal, () => accounts.authorized(id, account =>
+      accounts.transport.responses(account, body, request.headers, sessionId, signal)));
   } finally { accounts.invalidateUsage(id); }
   const headers = responseHeaders(response.headers);
   headers.delete("content-encoding"); // fetch has already decoded the upstream body.

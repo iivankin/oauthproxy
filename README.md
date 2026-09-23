@@ -6,6 +6,7 @@ One Bun server for Claude and Codex, with multi-account OAuth, token refresh, qu
 - `POST /v1/responses` — Codex SSE over native HTTPS.
 - `WS /v1/responses` — Codex WebSocket forwarding; one account per connection.
 - Provider models and accounts: `/claude/v1/models`, `/codex/v1/models`, `/claude/accounts`, `/codex/accounts`.
+- `GET /dashboard` — public HTML dashboard: accounts, quotas, in-memory HTTP/WS transport counters. No authentication, even with `PROXY_API_KEY`; restrict access in nginx. Refreshes every 30s.
 
 ## Quick start
 

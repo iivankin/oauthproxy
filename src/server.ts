@@ -7,21 +7,26 @@ import { NativeRelay } from "./codex/relay.ts";
 import { MAX_PAYLOAD } from "./codex/websocket.ts";
 import { streamResponses } from "./codex/sse.ts";
 import { authorized, handler } from "./proxy.ts";
+import { Stats } from "./stats.ts";
+import { dashboard } from "./dashboard.ts";
 
 export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, key?: string,
   codex = new CodexAccounts(new CodexStore(), new CodexTransport())) {
   if (!["127.0.0.1", "localhost", "::1"].includes(hostname) && !key)
     throw new Error("Set PROXY_API_KEY before binding a non-loopback interface");
-  const claude = handler(accounts, key);
+  const stats = new Stats();
+  const claude = handler(accounts, key, stats);
   const server = Bun.serve<NativeRelay>({
     hostname, port, idleTimeout: 0, maxRequestBodySize: MAX_PAYLOAD,
     async fetch(request, server) {
+      const path = new URL(request.url).pathname;
+      // Deliberately public; protect this route at the reverse proxy when exposing the server.
+      if (path === "/dashboard" && request.method === "GET") return dashboard(accounts, codex, stats);
       if (!authorized(request, key)) return proxyError(401, "Invalid proxy API key");
       if (request.headers.has("origin")) return proxyError(403, "Browser origins are not supported");
-      const path = new URL(request.url).pathname;
       try {
         if (path === "/v1/responses") return request.method === "POST"
-          ? await streamResponses(codex, request) : await upgrade(codex, request, server);
+          ? await streamResponses(codex, request, stats) : await upgrade(codex, request, server, stats);
         if (path.startsWith("/codex/")) return await codexHttp(codex, request);
         return claude(request);
       } catch (error) { return upstreamError(error); }

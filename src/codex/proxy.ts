@@ -5,6 +5,7 @@ import { websocketHeaders } from "./profile.ts";
 import { NativeRelay } from "./relay.ts";
 import { UpstreamError } from "./transport.ts";
 import { connectUpstream } from "./websocket.ts";
+import { Stats } from "../stats.ts";
 
 export function proxyError(status: number, message: string) {
   return Response.json({ error: { type: "proxy_error", message } }, { status, headers: { "cache-control": "no-store" } });
@@ -21,7 +22,7 @@ export function upstreamError(error: unknown) {
     error instanceof SelectionError ? error.message : "Codex account or upstream operation failed");
 }
 
-export async function upgrade(accounts: Accounts, request: Request, server: Server<NativeRelay>) {
+export async function upgrade(accounts: Accounts, request: Request, server: Server<NativeRelay>, stats = new Stats()) {
   const headers = request.headers;
   if (request.method !== "GET" || headers.get("upgrade")?.toLowerCase() !== "websocket")
     return proxyError(426, "Use WebSocket upgrade or POST with stream: true");
@@ -32,13 +33,20 @@ export async function upgrade(accounts: Accounts, request: Request, server: Serv
   const model = new URL(request.url).searchParams.get("model") || undefined;
   const id = await accounts.choose(model);
   request.signal.throwIfAborted();
-  const upstream = await accounts.authorized(id, account => connectUpstream(accounts.transport.endpoints.responses,
-    websocketHeaders(account, headers, sessionId, accounts.transport.version), request.signal));
+  const done = stats.start("Codex", id, "WS");
+  let upstream: Awaited<ReturnType<typeof connectUpstream>>;
+  try {
+    upstream = await accounts.authorized(id, account => connectUpstream(accounts.transport.endpoints.responses,
+      websocketHeaders(account, headers, sessionId, accounts.transport.version), request.signal));
+  } catch (error) { done(request.signal.aborted ? "cancelled" : "errors"); throw error; }
+  upstream.socket.once("close", code => done([1000, 1001, 1005].includes(code) ? "completed" : "errors"));
+  if (upstream.socket.readyState === upstream.socket.CLOSED) done("errors");
   upstream.relay.onClose = () => accounts.invalidateUsage(id);
-  if (request.signal.aborted) { upstream.socket.terminate(); return proxyError(499, "Client disconnected"); }
+  if (request.signal.aborted) { done("cancelled"); upstream.socket.terminate(); return proxyError(499, "Client disconnected"); }
   const reply = responseHeaders(upstream.headers, true);
   reply.set("session-id", sessionId);
   if (server.upgrade(request, { data: upstream.relay, headers: reply })) return undefined;
+  done("errors");
   upstream.socket.terminate();
   return proxyError(400, "WebSocket upgrade rejected");
 }

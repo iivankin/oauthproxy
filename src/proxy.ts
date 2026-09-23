@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Accounts } from "./accounts.ts";
 import { AppError, messageSchema } from "./schema.ts";
 import { exhaustedQuota } from "./quota.ts";
+import { Stats } from "./stats.ts";
 
 export function authorized(request: Pick<Request, "headers">, key?: string) {
   if (!key) return true;
@@ -26,7 +27,7 @@ function forward(response: Response, sessionId: string) {
   return new Response(response.body, { status: response.status, headers });
 }
 
-export function handler(accounts: Accounts, key?: string) {
+export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
   return async (request: Request): Promise<Response> => {
     try {
       if (!authorized(request, key)) return errorResponse(401, "Invalid proxy API key");
@@ -59,7 +60,8 @@ export function handler(accounts: Accounts, key?: string) {
       let id = await accounts.choose(input.data.model, excluded);
       for (;;) {
         excluded.add(id);
-        const response = await accounts.message(id, input.data, sessionId, promptId, betas, signal);
+        const response = await stats.http("Claude", id, signal, () =>
+          accounts.message(id, input.data, sessionId, promptId, betas, signal));
         const scope = exhaustedQuota(response);
         if (!scope) return forward(response, sessionId);
         accounts.limited(id, response.headers, scope === "model" ? input.data.model : undefined);
