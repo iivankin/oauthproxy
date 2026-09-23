@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "target": "ESNext", "module": "Preserve", "moduleResolution": "Bundler",
+    "strict": true, "noEmit": true, "allowImportingTsExtensions": true,
+    "skipLibCheck": true, "types": ["bun"]
+  },
+  "include": ["src/**/*.ts", "test/**/*.ts", "examples/**/*.ts"]
+}

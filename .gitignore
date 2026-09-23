@@ -1,0 +1,11 @@
+node_modules/
+dist/
+accounts.json
+accounts.json.*
+.env
+.env.*
+.DS_Store
+.claude-proxy-cas/
+comparison*/
+codex-accounts.json
+codex-accounts.json.*
