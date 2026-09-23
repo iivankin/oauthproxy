@@ -7,11 +7,12 @@ const fixtures: Awaited<ReturnType<typeof fixture>>[] = [];
 async function setup() { const f = await fixture(); fixtures.push(f); return f; }
 afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 
-test("dashboard is public, escapes account metadata, and never exposes credentials", async () => {
+test("dashboard is public, escapes metadata, and shows only the configured client credential", async () => {
   const f = await setup();
   await f.accounts.store.update(data => { data.accounts[0]!.name = '<script>alert("secret")</script>'; });
   f.usage.set("Bearer a-access", { rate_limit: { allowed: true, limit_reached: false,
-    primary_window: { used_percent: 100, limit_window_seconds: 18000, reset_at: 1800000000 } }, email: "codex@test.invalid" });
+    primary_window: { used_percent: 100, limit_window_seconds: 18000, reset_at: 1800000000 } },
+    email: "codex@test.invalid", plan_type: "prolite" });
   const response = await fetch(`${f.url}dashboard`);
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toContain("text/html");
@@ -21,10 +22,15 @@ test("dashboard is public, escapes account metadata, and never exposes credentia
   expect(html).toContain("&lt;script&gt;alert(&quot;secret&quot;)&lt;/script&gt;");
   expect(html).toContain("test@invalid");
   expect(html).toContain("codex@test.invalid");
+  expect(html).toContain("Max");
+  expect(html).toContain("Pro Lite");
+  expect(html).toContain("Bearer local-key");
+  expect(html).toContain("POST /v1/messages");
+  expect(html).toContain("POST /v1/responses (SSE)");
   expect(html).toContain("100%");
   expect(html).toContain("5h");
   expect(html).not.toContain("Quota exhausted"); // Rounded 100% does not override allowed=true.
-  for (const secret of ["a-access", "b-access", "a-refresh", "claude-token", "local-key", "<script>"])
+  for (const secret of ["a-access", "b-access", "a-refresh", "claude-token", "<script>"])
     expect(html).not.toContain(secret);
   expect((await fetch(`${f.url}codex/accounts`)).status).toBe(401);
   expect((await fetch(`${f.url}v1/responses`, { method: "POST" })).status).toBe(401);

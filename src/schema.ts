@@ -39,8 +39,12 @@ export const modelsPageSchema = z.object({
 });
 export const profileSchema = z.object({
   account: z.object({ uuid: z.string(), email: z.string() }),
-  organization: z.object({ uuid: z.string() }),
+  organization: z.object({
+    uuid: z.string(), organization_type: z.string().nullish(),
+    rate_limit_tier: z.string().nullish(), seat_tier: z.string().nullish(),
+  }),
 });
+export type Profile = z.infer<typeof profileSchema>;
 
 export const messageSchema = z.object({
   model: z.string().min(1), max_tokens: z.number().int().positive(),

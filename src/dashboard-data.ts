@@ -7,14 +7,23 @@ import type { Provider } from "./stats.ts";
 export type Quota = { label: string; used: number | null; resets: string | null; blocked?: boolean };
 export type DashboardAccount = {
   provider: Provider; id: string; name: string; identity: string;
-  status: string; quotas: Quota[];
+  status: string; tier?: string; quotas: Quota[];
 };
 const windowSchema = z.object({
   used_percent: z.number().finite().nullable().optional(),
   reset_at: z.number().finite().nullable().optional(),
   limit_window_seconds: z.number().positive().optional(),
 });
-const codexIdentitySchema = z.object({ email: z.string().email().optional() }).passthrough();
+const codexIdentitySchema = z.object({
+  email: z.string().email().optional(), plan_type: z.string().min(1).optional(),
+}).passthrough();
+
+function subscriptionTier(value: string) {
+  const known: Record<string, string> = { free: "Free", plus: "Plus", pro: "Pro", prolite: "Pro Lite",
+    claude_pro: "Pro", claude_max: "Max", claude_team: "Team", claude_enterprise: "Enterprise",
+    team: "Team", business: "Business", enterprise: "Enterprise" };
+  return known[value.toLowerCase()] ?? value.replaceAll(/[_-]+/g, " ").replaceAll(/\b\w/g, letter => letter.toUpperCase());
+}
 
 function codexQuotas(usage: CodexUsage): Quota[] {
   const groups = [
@@ -43,6 +52,7 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts) 
   const [claudeRows, codexRows] = await Promise.all([
     claude.status().then(rows => rows.map((account): DashboardAccount => ({
       provider: "Claude", id: account.id, name: account.name, identity: account.email,
+      tier: account.subscriptionType ? subscriptionTier(account.subscriptionType) : undefined,
       status: account.disabled ? "Disabled" : "error" in account ? "Quota unavailable" : "Connected",
       quotas: account.usage ? Object.entries(account.usage).flatMap(([label, value]) => {
         const parsed = z.object({ utilization: z.number().finite().nullable(), resets_at: z.string().nullable(), locked_reason: z.string().nullish() }).safeParse(value);
@@ -59,6 +69,7 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts) 
         const usage = await codex.usage(account.id);
         const identity = codexIdentitySchema.safeParse(usage);
         if (identity.success && identity.data.email) row.identity = identity.data.email;
+        if (identity.success && identity.data.plan_type) row.tier = subscriptionTier(identity.data.plan_type);
         row.quotas = codexQuotas(usage);
         if (!usage.rate_limit) row.status = "Quota unavailable";
         else if (!usage.rate_limit.allowed) row.status = "Quota exhausted";

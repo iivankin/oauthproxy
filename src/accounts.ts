@@ -1,11 +1,12 @@
 import { randomInt, randomBytes } from "node:crypto";
 import { AccountStore } from "./store.ts";
 import { Transport, UpstreamError, jsonResponse } from "./transport.ts";
-import { AppError, modelsPageSchema, profileSchema, usageSchema, safeAccount, type Tokens, type Usage, type Model, type Account, type Message } from "./schema.ts";
+import { AppError, modelsPageSchema, profileSchema, usageSchema, safeAccount, type Tokens, type Usage, type Model, type Account, type Message, type Profile } from "./schema.ts";
 import { hasQuota, retryAt } from "./quota.ts";
 
 export class Accounts {
   private usageCache = new Map<string, { until: number; value: Promise<Usage> }>();
+  private profileCache = new Map<string, { until: number; value: Promise<Profile> }>();
   private modelsCache = new Map<string, { until: number; value: Promise<Model[]> }>();
   private cooldown = new Map<string, number>();
   private modelCooldown = new Map<string, Map<string, number>>();
@@ -27,6 +28,7 @@ export class Accounts {
       }
     });
     this.usageCache.delete(id);
+    this.profileCache.set(id, { until: Date.now() + 300_000, value: Promise.resolve(profile) });
     this.modelsCache.delete(id);
     this.cooldown.delete(id);
     this.modelCooldown.delete(id);
@@ -88,6 +90,16 @@ export class Accounts {
     return value;
   }
 
+  profile(id: string): Promise<Profile> {
+    const cached = this.profileCache.get(id);
+    if (cached && cached.until > Date.now()) return cached.value;
+    const value = this.request(id, "/api/oauth/profile").then(jsonResponse).then(data => profileSchema.parse(data));
+    const entry = { until: Date.now() + 300_000, value };
+    this.profileCache.set(id, entry);
+    value.catch(() => { if (this.profileCache.get(id) === entry) this.profileCache.delete(id); });
+    return value;
+  }
+
   models(id: string): Promise<Model[]> {
     const cached = this.modelsCache.get(id);
     if (cached && cached.until > Date.now()) return cached.value;
@@ -144,9 +156,17 @@ export class Accounts {
 
   async status(force = false) {
     return Promise.all((await this.store.read()).accounts.map(async account => {
-      if (account.disabled) return { ...safeAccount(account), usage: null, error: "Login required" };
-      try { return { ...safeAccount(account), usage: await this.usage(account.id, force) }; }
-      catch { return { ...safeAccount(account), usage: null, error: "Cannot load quota; account excluded from selection" }; }
+      if (account.disabled) return { ...safeAccount(account), usage: null, error: "Login required",
+        subscriptionType: null, rateLimitTier: null, seatTier: null };
+      const profile = await this.profile(account.id).catch(() => null);
+      try { return { ...safeAccount(account), usage: await this.usage(account.id, force),
+        subscriptionType: profile?.organization.organization_type ?? null,
+        rateLimitTier: profile?.organization.rate_limit_tier ?? null,
+        seatTier: profile?.organization.seat_tier ?? null }; }
+      catch { return { ...safeAccount(account), usage: null, error: "Cannot load quota; account excluded from selection",
+        subscriptionType: profile?.organization.organization_type ?? null,
+        rateLimitTier: profile?.organization.rate_limit_tier ?? null,
+        seatTier: profile?.organization.seat_tier ?? null }; }
     }));
   }
 

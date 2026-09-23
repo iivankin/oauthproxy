@@ -82,7 +82,8 @@ export async function fixture(config: { key?: string | null } = {}) {
   const claude = new ClaudeAccounts(claudeStore, new ClaudeTransport(async url => {
     const path = new URL(url).pathname;
     if (path === "/token") return Response.json({ access_token: "claude-new-token", refresh_token: "claude-new-refresh", expires_in: 3600 });
-    if (path === "/api/oauth/profile") return Response.json({ account: { uuid: crypto.randomUUID(), email: "new@test.invalid" }, organization: { uuid: "new-org" } });
+    if (path === "/api/oauth/profile") return Response.json({ account: { uuid: crypto.randomUUID(), email: "new@test.invalid" },
+      organization: { uuid: "new-org", organization_type: "claude_max", rate_limit_tier: "default_claude_max_5x" } });
     if (path === "/api/oauth/usage") return Response.json({ five_hour: { utilization: 1, resets_at: null }, seven_day: { utilization: 1, resets_at: null } });
     if (path === "/v1/models") return Response.json({ data: [{ id: "claude-test" }] });
     return new Response('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n', { headers: { "content-type": "text/event-stream" } });

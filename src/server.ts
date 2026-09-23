@@ -21,9 +21,16 @@ export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, k
   const server = Bun.serve<NativeRelay>({
     hostname, port, idleTimeout: 0, maxRequestBodySize: MAX_PAYLOAD,
     async fetch(request, server) {
-      const path = new URL(request.url).pathname;
+      const url = new URL(request.url);
+      const path = url.pathname;
       // Deliberately public; protect this route at the reverse proxy when exposing the server.
-      if (path === "/dashboard" && request.method === "GET") return dashboard(accounts, codex, stats);
+      if (path === "/dashboard" && request.method === "GET") {
+        const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
+        const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+        const origin = ["http", "https"].includes(forwardedProto ?? "") && forwardedHost
+          ? `${forwardedProto}://${forwardedHost}` : url.origin;
+        return dashboard(accounts, codex, stats, key, origin);
+      }
       if (path.startsWith("/admin/") && !key)
         return proxyError(503, "Set PROXY_API_KEY to enable admin routes");
       if (!authorized(request, key)) return proxyError(401, "Invalid proxy API key");
