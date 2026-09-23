@@ -20,7 +20,7 @@ export function tokens(accountId: string, expiresIn = 3600) {
     id_token: jwt({ "https://api.openai.com/auth": { chatgpt_account_id: accountId } }) };
 }
 
-export async function fixture() {
+export async function fixture(config: { key?: string | null } = {}) {
   const directory = await mkdtemp(join(tmpdir(), "oauth-proxy-test-"));
   const usage = new Map<string, unknown>();
   const frames: string[] = [];
@@ -81,11 +81,13 @@ export async function fixture() {
     clientId: "test", scopes: [] }); });
   const claude = new ClaudeAccounts(claudeStore, new ClaudeTransport(async url => {
     const path = new URL(url).pathname;
+    if (path === "/token") return Response.json({ access_token: "claude-new-token", refresh_token: "claude-new-refresh", expires_in: 3600 });
+    if (path === "/api/oauth/profile") return Response.json({ account: { uuid: crypto.randomUUID(), email: "new@test.invalid" }, organization: { uuid: "new-org" } });
     if (path === "/api/oauth/usage") return Response.json({ five_hour: { utilization: 1, resets_at: null }, seven_day: { utilization: 1, resets_at: null } });
     if (path === "/v1/models") return Response.json({ data: [{ id: "claude-test" }] });
     return new Response('event: message_start\ndata: {"type":"message_start","message":{"id":"msg_test","type":"message","role":"assistant","content":[],"model":"claude-test","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n\nevent: message_stop\ndata: {"type":"message_stop"}\n\n', { headers: { "content-type": "text/event-stream" } });
   }, "https://mock.invalid", "https://mock.invalid/token", new HistoryStore(join(directory, "cas"))));
-  const proxy = serve(claude, "127.0.0.1", 0, "local-key", accounts);
+  const proxy = serve(claude, "127.0.0.1", 0, config.key === null ? undefined : config.key ?? "local-key", accounts);
   const url = proxy.url.toString();
   return { accounts, transport, a, b, directory, options, usage, calls, frames, handshakes, upstreamSockets, events,
     url, wsUrl: `${url.replace("http", "ws")}v1/responses`,

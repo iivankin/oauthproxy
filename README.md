@@ -7,6 +7,7 @@ One Bun server for Claude and Codex, with multi-account OAuth, token refresh, qu
 - `WS /v1/responses` — Codex WebSocket forwarding; one account per connection.
 - Provider models and accounts: `/claude/v1/models`, `/codex/v1/models`, `/claude/accounts`, `/codex/accounts`.
 - `GET /dashboard` — public HTML dashboard: accounts, quotas, in-memory HTTP/WS transport counters. No authentication, even with `PROXY_API_KEY`; restrict access in nginx. Refreshes every 30s.
+- Admin OAuth: `POST /admin/{claude,codex}/oauth/start`, Claude `POST /admin/claude/oauth/complete`, and `GET /admin/oauth/<flow-id>`. These routes require `PROXY_API_KEY`; credentials are saved server-side and never returned.
 
 ## Quick start
 
@@ -32,3 +33,10 @@ bun run build
 ```
 
 Client contracts and limitations: [Claude](docs/CLAUDE.md) · [Codex](docs/CODEX.md).
+
+## Docker
+
+```sh
+docker build -t oauth-proxy .
+docker run --rm -p 3000:3000 -e PROXY_API_KEY='change-me' -v oauth-proxy-data:/data oauth-proxy
+```

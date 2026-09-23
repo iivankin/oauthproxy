@@ -53,3 +53,7 @@ Account switches do not transfer previous-response IDs. Cross-account portabilit
 - `GET /health`: local server health only.
 
 All routes use the same proxy key. Browser Origin requests are rejected. Files, batches and token-counting endpoints are not implemented.
+
+## Remote login
+
+With `PROXY_API_KEY` configured, `POST /admin/claude/oauth/start` with `{}` or `{"name":"label"}` returns a flow ID and authorization URL. After signing in, send the displayed `code#state` to `POST /admin/claude/oauth/complete` as `{"flowId":"...","code":"..."}`. The five-minute flow is in memory. The response contains safe account metadata; credentials stay in `accounts.json`.

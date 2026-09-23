@@ -1,0 +1,12 @@
+.git
+.gitignore
+.env
+.env.*
+.claude-proxy-cas
+accounts.json
+accounts.json.*
+codex-accounts.json
+codex-accounts.json.*
+dist
+node_modules
+test

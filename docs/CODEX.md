@@ -12,6 +12,8 @@ bun run cli codex models
 
 Login prints a device code and `https://auth.openai.com/codex/device`, then waits up to 15 minutes. There is no browser-login fallback.
 
+For remote management, with `PROXY_API_KEY` configured, `POST /admin/codex/oauth/start` with `{}` or `{"name":"label"}` returns a flow ID, verification URL and user code. Poll `GET /admin/oauth/<flow-id>` until `completed` or `failed`. The flow is in memory; credentials stay in `codex-accounts.json` and are never returned.
+
 Credentials are stored in `codex-accounts.json` in cwd, with `0600` permissions, atomic writes and a cross-process lock. The installed Codex's credentials are not touched. Tokens refresh before expiry, every 30 seconds in the background, or once after HTTP 401. Invalid refresh tokens disable the account until login.
 
 ## WebSocket
