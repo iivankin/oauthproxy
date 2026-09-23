@@ -18,12 +18,13 @@ Credentials are stored in `codex-accounts.json` in cwd, with `0600` permissions,
 
 ## WebSocket
 
-`WS /v1/responses?model=<slug>` forwards to `wss://chatgpt.com/backend-api/codex/responses`.
+`WS /v1/responses` forwards to `wss://chatgpt.com/backend-api/codex/responses`.
 
 - Authenticate with `Authorization: Bearer <PROXY_API_KEY>` or `x-api-key`.
 - Send `session-id`; if missing, the proxy warns, creates one and returns it in HTTP 101.
 - Optional `thread-id` and `x-client-request-id` default to the session ID.
-- Optional `?model=` filters accounts by catalog and known model quota. It does not replace `model` in JSON.
+- Each `response.create` carries its own model, so one connection may use different models.
+- Optional `?model=` is only an account-selection hint during the handshake. Omit it when switching models; it never replaces `model` in JSON.
 
 One connection uses one randomly selected account until it closes. Browser Origin and WebSocket subprotocols are rejected.
 

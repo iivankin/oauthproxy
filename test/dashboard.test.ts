@@ -29,9 +29,12 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(html).toContain("POST /v1/responses (SSE)");
   expect(html).toContain('&quot;model&quot;:&quot;claude-sonnet-5&quot;');
   expect(html).toContain('&quot;model&quot;:&quot;gpt-6-sol&quot;');
+  expect(html).toContain('&quot;content&quot;:&quot;Hello&quot;}],&quot;stream&quot;:true');
   expect(html).toContain('&quot;input&quot;:[{&quot;role&quot;:&quot;user&quot;');
   expect(html).not.toContain("&lt;claude-model&gt;");
   expect(html).not.toContain("&lt;codex-model&gt;");
+  expect(html).toContain("WS  /v1/responses</code>");
+  expect(html).not.toContain("WS  /v1/responses?model=");
   expect(html).toContain('id="claude-oauth-start"');
   expect(html).toContain('id="codex-oauth-start"');
   expect(html).toContain("/admin/claude/oauth/complete");

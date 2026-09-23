@@ -35,7 +35,7 @@ export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: S
   -H '${authorization}' \\
   -H 'Content-Type: application/json' \\
   -H 'x-claude-code-session-id: 00000000-0000-4000-8000-000000000000' \\
-  -d '{"model":"claude-sonnet-5","max_tokens":256,"messages":[{"role":"user","content":"Hello"}]}'`;
+  -d '{"model":"claude-sonnet-5","max_tokens":256,"messages":[{"role":"user","content":"Hello"}],"stream":true}'`;
   const codexRequest = `curl '${origin}/v1/responses' \\
   -H '${authorization}' \\
   -H 'Content-Type: application/json' \\
@@ -81,7 +81,7 @@ ${rows || '<tr><td colspan="8" class="empty">No traffic yet</td></tr>'}</tbody><
 <pre><code>GET /claude/v1/models     GET /claude/accounts
 GET /codex/v1/models      GET /codex/accounts
 GET /codex/usage?account=&lt;id&gt;
-WS  /v1/responses?model=gpt-6-sol</code></pre>
+WS  /v1/responses</code></pre>
 <footer><small>Since ${escape(date(stats.since.toISOString()))} · In memory · Per-account attempts<br>HTTP: completed 2xx streams, non-2xx / transport errors. WS: connections, not model turns. In-stream model errors are not counted.</small></footer>
 </main><script>${dashboardScript}</script></body></html>`, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": "no-store, no-transform",
