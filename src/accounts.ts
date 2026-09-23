@@ -84,7 +84,7 @@ export class Accounts {
     const cached = this.usageCache.get(id);
     if (!force && cached && cached.until > Date.now()) return cached.value;
     const value = this.request(id, "/api/oauth/usage").then(jsonResponse).then(data => usageSchema.parse(data));
-    const entry = { until: Date.now() + 30_000, value };
+    const entry = { until: Date.now() + 300_000, value };
     this.usageCache.set(id, entry);
     value.catch(() => { if (this.usageCache.get(id) === entry) this.usageCache.delete(id); });
     return value;
@@ -158,23 +158,25 @@ export class Accounts {
     return Promise.all((await this.store.read()).accounts.map(async account => {
       if (account.disabled) return { ...safeAccount(account), usage: null, error: "Login required",
         subscriptionType: null, rateLimitTier: null, seatTier: null };
-      const profile = await this.profile(account.id).catch(() => null);
+      let usage: Usage;
       try {
-        let usage: Usage;
-        try { usage = await this.usage(account.id, force); }
-        catch { usage = await this.usage(account.id, true); }
-        return { ...safeAccount(account), usage,
-          subscriptionType: profile?.organization.organization_type ?? null,
-          rateLimitTier: profile?.organization.rate_limit_tier ?? null,
-          seatTier: profile?.organization.seat_tier ?? null };
+        // Usage and profile share a tight control-plane rate limit. Load quota
+        // first; a profile failure must not hide otherwise valid quota data.
+        usage = await this.usage(account.id, force);
       }
       catch (error) {
+        const profile = await this.profile(account.id).catch(() => null);
         console.warn(`Cannot load quota for ${account.id}: ${error instanceof Error ? error.message : "unknown error"}`);
         return { ...safeAccount(account), usage: null, error: "Cannot load quota; account excluded from selection",
           subscriptionType: profile?.organization.organization_type ?? null,
           rateLimitTier: profile?.organization.rate_limit_tier ?? null,
           seatTier: profile?.organization.seat_tier ?? null };
       }
+      const profile = await this.profile(account.id).catch(() => null);
+      return { ...safeAccount(account), usage,
+        subscriptionType: profile?.organization.organization_type ?? null,
+        rateLimitTier: profile?.organization.rate_limit_tier ?? null,
+        seatTier: profile?.organization.seat_tier ?? null };
     }));
   }
 

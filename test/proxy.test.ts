@@ -45,19 +45,26 @@ function controlPlane(url: string | URL, init?: RequestInit) {
 }
 
 describe("account routing and quota", () => {
-  test("status retries a transient quota failure without leaving the dashboard empty", async () => {
-    let attempts = 0;
+  test("status loads and caches quota before a rate-limited profile", async () => {
+    let usageAttempts = 0, profileAttempts = 0;
     const accounts = await setup(async url => {
       const path = new URL(url).pathname;
-      if (path === "/api/oauth/profile") return Response.json({ error: "unavailable" }, { status: 503 });
-      if (path === "/api/oauth/usage" && attempts++ === 0)
-        return Response.json({ error: "unavailable" }, { status: 503 });
-      return Response.json(quota());
+      if (path === "/api/oauth/usage") { usageAttempts++; return Response.json(quota()); }
+      if (path === "/api/oauth/profile") {
+        profileAttempts++;
+        if (profileAttempts === 1) return Response.json({ error: { type: "rate_limit_error" } }, { status: 429 });
+        return Response.json({ account: { uuid: "a", email: "a@test.invalid" },
+          organization: { uuid: "org", organization_type: "claude_pro" } });
+      }
+      return new Response("{}", { status: 404 });
     }, ["a"]);
-    const [status] = await accounts.status();
-    expect(attempts).toBe(2);
-    expect(status?.usage?.five_hour?.utilization).toBe(10);
-    expect(status).not.toHaveProperty("error");
+    const [first] = await accounts.status();
+    expect(first?.usage?.five_hour?.utilization).toBe(10);
+    expect(first?.subscriptionType).toBeNull();
+    const [second] = await accounts.status();
+    expect(second?.usage?.five_hour?.utilization).toBe(10);
+    expect(second?.subscriptionType).toBe("claude_pro");
+    expect({ usageAttempts, profileAttempts }).toEqual({ usageAttempts: 1, profileAttempts: 2 });
   });
 
   test("excludes exhausted account and preserves custom tools, system and beta flags", async () => {
