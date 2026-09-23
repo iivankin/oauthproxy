@@ -3,6 +3,7 @@
 One Bun server for Claude and Codex, with multi-account OAuth, token refresh, quota checks, and random eligible-account selection.
 
 - `POST /v1/messages` — Claude JSON/SSE.
+- `POST /v1/responses` — Codex SSE over native HTTPS.
 - `WS /v1/responses` — Codex WebSocket forwarding; one account per connection.
 - Provider models and accounts: `/claude/v1/models`, `/codex/v1/models`, `/claude/accounts`, `/codex/accounts`.
 

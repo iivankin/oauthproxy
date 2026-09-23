@@ -12,9 +12,9 @@ bun run cli codex models
 
 Login prints a device code and `https://auth.openai.com/codex/device`, then waits up to 15 minutes. There is no browser-login fallback.
 
-Credentials are stored in `codex-accounts.json` in cwd, with `0600` permissions, atomic writes and a cross-process lock. The installed Codex's credentials are not touched. Tokens refresh before expiry, every 30 seconds in the background, or once after a handshake 401. Invalid refresh tokens disable the account until login.
+Credentials are stored in `codex-accounts.json` in cwd, with `0600` permissions, atomic writes and a cross-process lock. The installed Codex's credentials are not touched. Tokens refresh before expiry, every 30 seconds in the background, or once after HTTP 401. Invalid refresh tokens disable the account until login.
 
-## Connection
+## WebSocket
 
 `WS /v1/responses?model=<slug>` forwards to `wss://chatgpt.com/backend-api/codex/responses`.
 
@@ -23,7 +23,7 @@ Credentials are stored in `codex-accounts.json` in cwd, with `0600` permissions,
 - Optional `thread-id` and `x-client-request-id` default to the session ID.
 - Optional `?model=` filters accounts by catalog and known model quota. It does not replace `model` in JSON.
 
-One connection uses one randomly selected account until it closes. Browser Origin and WebSocket subprotocols are rejected. HTTP/SSE Responses requests are not supported.
+One connection uses one randomly selected account until it closes. Browser Origin and WebSocket subprotocols are rejected.
 
 The proxy supplies account authorization, Codex version/User-Agent, `originator`, session headers and `OpenAI-Beta: responses_websockets=2026-02-06`. Client credentials, cookies and stale account/routing headers are not forwarded. TLS fingerprints and attestation are not emulated.
 
@@ -49,6 +49,14 @@ JSON payloads are not rewritten. No prompts, tools, cache markers or metadata ar
 This is the Codex backend schema; `stream: true` matches its client, not the public Responses WebSocket guide.
 
 Wait for `response.completed`, then send its `response.id` as `previous_response_id` with the next input. Example: `bun examples/codex-two-turns.ts '<model-slug>'`.
+
+## HTTP / SSE
+
+`POST /v1/responses` forwards directly to `https://chatgpt.com/backend-api/codex/responses`, without a WebSocket bridge. Send `Content-Type: application/json` and the same body as above **without `type`**. `model`, `input` and `stream: true` are required; non-streaming JSON mode is not implemented. Auth/session headers are the same; the WebSocket beta header is not sent.
+
+Each HTTP request selects an eligible account using the body model. Send full context each time: a session ID does not pin the account or preserve WebSocket response state. The request body and SSE bytes are forwarded unchanged, including opaque reasoning, compaction and unknown events.
+
+HTTP errors retain status/body/retry headers. Only HTTP 401 triggers one refresh/retry on the same account, before forwarding a response. No replay on 429, 5xx, refusals or stream errors. Canceling the client request cancels upstream. Require a terminal event; HTTP 200 or EOF alone does not prove success. Maximum request body: 32 MiB; upstream request timeout: 10 minutes.
 
 ## Errors and state
 

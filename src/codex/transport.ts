@@ -1,4 +1,4 @@
-import { CODEX_VERSION, CLIENT_ID, ENDPOINTS, authHeaders, type Endpoints } from "./profile.ts";
+import { CODEX_VERSION, CLIENT_ID, ENDPOINTS, authHeaders, responsesHeaders, type Endpoints } from "./profile.ts";
 import { tokensSchema, type Account } from "./schema.ts";
 
 export class UpstreamError extends Error {
@@ -33,4 +33,16 @@ export class Transport {
   }
 
   get(url: string, account: Account) { return this.request(url, { headers: authHeaders(account, this.version) }); }
+
+  async responses(account: Account, body: string, incoming: Headers, sessionId: string, signal: AbortSignal) {
+    const response = await fetch(this.endpoints.responsesHttp, {
+      method: "POST", redirect: "error", body, signal,
+      headers: { ...responsesHeaders(account, incoming, sessionId, this.version),
+        "content-type": "application/json", accept: "text/event-stream" },
+    });
+    // Only auth rejection enters the existing refresh path; all other bodies stay streaming.
+    if (response.status === 401)
+      throw new UpstreamError(401, new Uint8Array(await response.arrayBuffer()), response.headers);
+    return response;
+  }
 }

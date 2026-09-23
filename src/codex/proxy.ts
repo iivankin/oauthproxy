@@ -24,7 +24,7 @@ export function upstreamError(error: unknown) {
 export async function upgrade(accounts: Accounts, request: Request, server: Server<NativeRelay>) {
   const headers = request.headers;
   if (request.method !== "GET" || headers.get("upgrade")?.toLowerCase() !== "websocket")
-    return proxyError(426, "Use WebSocket upgrade, not HTTP/SSE");
+    return proxyError(426, "Use WebSocket upgrade or POST with stream: true");
   if (headers.get("sec-websocket-version") !== "13" || !/^[+/0-9A-Za-z]{22}==$/.test(headers.get("sec-websocket-key") ?? "") ||
     headers.has("sec-websocket-protocol")) return proxyError(400, "Expected standard WebSocket upgrade without subprotocol");
   const sessionId = headers.get("session-id") || crypto.randomUUID();

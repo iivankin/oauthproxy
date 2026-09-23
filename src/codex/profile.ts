@@ -6,6 +6,7 @@ export const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const ENDPOINTS = {
   issuer: "https://auth.openai.com",
   responses: "wss://chatgpt.com/backend-api/codex/responses",
+  responsesHttp: "https://chatgpt.com/backend-api/codex/responses",
   models: "https://chatgpt.com/backend-api/codex/models",
   usage: "https://chatgpt.com/backend-api/wham/usage",
 };
@@ -20,9 +21,8 @@ export function authHeaders(account: Account, version = CODEX_VERSION): Record<s
   };
 }
 
-export function websocketHeaders(account: Account, incoming: Headers, sessionId: string, version = CODEX_VERSION) {
+export function responsesHeaders(account: Account, incoming: Headers, sessionId: string, version = CODEX_VERSION) {
   const headers = authHeaders(account, version);
-  headers["openai-beta"] = "responses_websockets=2026-02-06";
   headers["session-id"] = sessionId;
   headers["thread-id"] = incoming.get("thread-id") || sessionId;
   headers["x-client-request-id"] = incoming.get("x-client-request-id") || headers["thread-id"];
@@ -30,4 +30,8 @@ export function websocketHeaders(account: Account, incoming: Headers, sessionId:
   if (features) headers["x-codex-beta-features"] = features;
   // No stale routing/attestation from a different account; native WS connect also starts without turn-state.
   return headers;
+}
+
+export function websocketHeaders(account: Account, incoming: Headers, sessionId: string, version = CODEX_VERSION) {
+  return { ...responsesHeaders(account, incoming, sessionId, version), "openai-beta": "responses_websockets=2026-02-06" };
 }

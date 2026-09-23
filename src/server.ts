@@ -5,6 +5,7 @@ import { Transport as CodexTransport } from "./codex/transport.ts";
 import { codexHttp, upgrade, proxyError, upstreamError } from "./codex/proxy.ts";
 import { NativeRelay } from "./codex/relay.ts";
 import { MAX_PAYLOAD } from "./codex/websocket.ts";
+import { streamResponses } from "./codex/sse.ts";
 import { authorized, handler } from "./proxy.ts";
 
 export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, key?: string,
@@ -19,7 +20,8 @@ export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, k
       if (request.headers.has("origin")) return proxyError(403, "Browser origins are not supported");
       const path = new URL(request.url).pathname;
       try {
-        if (path === "/v1/responses") return await upgrade(codex, request, server);
+        if (path === "/v1/responses") return request.method === "POST"
+          ? await streamResponses(codex, request) : await upgrade(codex, request, server);
         if (path.startsWith("/codex/")) return await codexHttp(codex, request);
         return claude(request);
       } catch (error) { return upstreamError(error); }
