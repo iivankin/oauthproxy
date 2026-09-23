@@ -45,6 +45,21 @@ function controlPlane(url: string | URL, init?: RequestInit) {
 }
 
 describe("account routing and quota", () => {
+  test("status retries a transient quota failure without leaving the dashboard empty", async () => {
+    let attempts = 0;
+    const accounts = await setup(async url => {
+      const path = new URL(url).pathname;
+      if (path === "/api/oauth/profile") return Response.json({ error: "unavailable" }, { status: 503 });
+      if (path === "/api/oauth/usage" && attempts++ === 0)
+        return Response.json({ error: "unavailable" }, { status: 503 });
+      return Response.json(quota());
+    }, ["a"]);
+    const [status] = await accounts.status();
+    expect(attempts).toBe(2);
+    expect(status?.usage?.five_hour?.utilization).toBe(10);
+    expect(status).not.toHaveProperty("error");
+  });
+
   test("excludes exhausted account and preserves custom tools, system and beta flags", async () => {
     let forwarded: Record<string, unknown> | undefined;
     let headers: Headers | undefined;

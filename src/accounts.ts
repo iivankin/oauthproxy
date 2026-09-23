@@ -159,10 +159,15 @@ export class Accounts {
       if (account.disabled) return { ...safeAccount(account), usage: null, error: "Login required",
         subscriptionType: null, rateLimitTier: null, seatTier: null };
       const profile = await this.profile(account.id).catch(() => null);
-      try { return { ...safeAccount(account), usage: await this.usage(account.id, force),
-        subscriptionType: profile?.organization.organization_type ?? null,
-        rateLimitTier: profile?.organization.rate_limit_tier ?? null,
-        seatTier: profile?.organization.seat_tier ?? null }; }
+      try {
+        let usage: Usage;
+        try { usage = await this.usage(account.id, force); }
+        catch { usage = await this.usage(account.id, true); }
+        return { ...safeAccount(account), usage,
+          subscriptionType: profile?.organization.organization_type ?? null,
+          rateLimitTier: profile?.organization.rate_limit_tier ?? null,
+          seatTier: profile?.organization.seat_tier ?? null };
+      }
       catch (error) {
         console.warn(`Cannot load quota for ${account.id}: ${error instanceof Error ? error.message : "unknown error"}`);
         return { ...safeAccount(account), usage: null, error: "Cannot load quota; account excluded from selection",

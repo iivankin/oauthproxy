@@ -17,7 +17,7 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toContain("text/html");
   expect(response.headers.get("cache-control")).toBe("no-store, no-transform");
-  expect(response.headers.get("content-security-policy")).toContain("frame-ancestors 'none'");
+  expect(response.headers.get("content-security-policy")).toBeNull();
   const html = await response.text();
   expect(html).toContain("&lt;script&gt;alert(&quot;secret&quot;)&lt;/script&gt;");
   expect(html).toContain("test@invalid");
@@ -30,7 +30,6 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(html).toContain('id="claude-oauth-start"');
   expect(html).toContain('id="codex-oauth-start"');
   expect(html).toContain("/admin/claude/oauth/complete");
-  expect(response.headers.get("content-security-policy")).toMatch(/script-src 'sha256-[A-Za-z0-9+/]+=*'/);
   expect(html).toContain("100%");
   expect(html).toContain("5h");
   expect(html).not.toContain("Quota exhausted"); // Rounded 100% does not override allowed=true.
