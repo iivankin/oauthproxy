@@ -3,6 +3,7 @@ import { z } from "zod";
 import { Accounts } from "./accounts.ts";
 import { AppError, messageSchema } from "./schema.ts";
 import { exhaustedQuota } from "./quota.ts";
+import type { UsageLimitMode } from "./quota.ts";
 import { Stats } from "./stats.ts";
 
 export function authorized(request: Pick<Request, "headers">, key?: string) {
@@ -53,22 +54,32 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
         console.warn("Missing x-claude-code-session-id; created a new session. Reuse the response header to link subsequent requests.");
       const sessionId = suppliedSession ?? crypto.randomUUID();
       if (!z.uuid().safeParse(sessionId).success) return errorResponse(400, "Session ID must be a UUID");
+      const rawUsageLimit = request.headers.get("anthropic-usage-limit");
+      if (rawUsageLimit !== null && rawUsageLimit !== "extended" && rawUsageLimit !== "slow")
+        return errorResponse(400, "anthropic-usage-limit must be extended or slow");
+      const usageLimit = rawUsageLimit as UsageLimitMode | null;
+      const gatewayPromptId = request.headers.get("x-claude-code-prompt-id");
+      if (gatewayPromptId !== null && !z.uuid().safeParse(gatewayPromptId).success)
+        return errorResponse(400, "x-claude-code-prompt-id must be a UUID");
       const betas = [...(input.data.betas ?? []), ...(request.headers.get("anthropic-beta") ?? "").split(",")].map(s => s.trim()).filter(Boolean);
-      const promptId = crypto.randomUUID();
+      const promptId = gatewayPromptId ?? crypto.randomUUID();
       const excluded = new Set<string>();
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(600_000)]);
-      let id = await accounts.choose(input.data.model, excluded);
+      const preferredId = await accounts.continuationAccount(sessionId, input.data);
+      const chooseOptions = { ...(usageLimit && { usageLimit }), ...(preferredId && { preferredId }) };
+      let id = await accounts.choose(input.data.model, excluded, chooseOptions);
       for (;;) {
         excluded.add(id);
         const response = await stats.http("Claude", id, signal, () =>
-          accounts.message(id, input.data, sessionId, promptId, betas, signal));
+          accounts.message(id, input.data, sessionId, promptId, betas, signal,
+            { ...(usageLimit && { usageLimit }), ...(gatewayPromptId && { gatewayPromptId }) }));
         const scope = exhaustedQuota(response);
         if (!scope) return forward(response, sessionId);
         accounts.limited(id, response.headers, scope === "model" ? input.data.model : undefined);
         if (response.headers.get("x-should-retry") === "false") return forward(response, sessionId);
         // Keep the original rejection until another eligible account is found;
         // a local selection failure must not replace its body or retry headers.
-        try { id = await accounts.choose(input.data.model, excluded); }
+        try { id = await accounts.choose(input.data.model, excluded, chooseOptions); }
         catch { return forward(response, sessionId); }
         await response.body?.cancel();
       }

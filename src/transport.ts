@@ -8,6 +8,7 @@ import { signBody } from "./signing.ts";
 import { relayMessage } from "./message-stream.ts";
 import { HistoryStore } from "./history-store.ts";
 import { historyHash, previousHistoryHash } from "./history.ts";
+import type { UsageLimitMode } from "./quota.ts";
 
 export type Fetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
 export const OAUTH = {
@@ -112,15 +113,20 @@ export class Transport {
     return this.response(this.client(account).get(path, { timeout: 15_000 }).asResponse());
   }
 
-  async message(account: Account, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal) {
+  async message(account: Account, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal,
+    hints: { usageLimit?: UsageLimitMode; gatewayPromptId?: string } = {}) {
     const previous = await this.history.get(sessionId, account.id, previousHistoryHash(input.messages));
     const body = prepareBody(input, { account, sessionId, promptId, previousRequestId: previous?.requestId, previousMessageId: previous?.messageId });
     // The proxy validates the envelope but preserves arbitrary API content/tool
     // blocks, including newer beta fields. Anthropic validates those server-side.
     const params = { ...body, betas: [...new Set([...BASE_BETAS, ...betas])] } as MessageCreateParamsBase;
     const upstream = new AbortController();
+    const hintHeaders = {
+      ...(hints.usageLimit && { "anthropic-usage-limit": hints.usageLimit }),
+      ...(hints.gatewayPromptId && { "x-claude-code-prompt-id": hints.gatewayPromptId }),
+    };
     const operation = this.client(account, sessionId).beta.messages.create(params,
-      { signal: AbortSignal.any([signal, upstream.signal]) });
+      { signal: AbortSignal.any([signal, upstream.signal]), ...(Object.keys(hintHeaders).length && { headers: hintHeaders }) });
     const save = async (message: { id: string; content: unknown }, requestId: string | null | undefined) => {
       if (!requestId || !/^req_[A-Za-z0-9_-]{1,36}$/.test(requestId) || !/^msg_[A-Za-z0-9_-]+$/.test(message.id)) return;
       const parsed = messageSchema.shape.messages.element.safeParse({ role: "assistant", content: message.content });

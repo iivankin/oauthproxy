@@ -93,7 +93,7 @@ describe("account routing and quota", () => {
       { type: "text", text: IDENTITY, cache_control: { type: "ephemeral", ttl: "1h" } },
       { type: "text", text: "Custom instructions", cache_control: { type: "ephemeral", ttl: "1h" } }]);
     expect(headers?.get("x-stainless-package-version")).toBe("0.112.1");
-    expect(headers?.get("user-agent")).toContain("sdk-ts, agent-sdk/0.3.280");
+    expect(headers?.get("user-agent")).toContain("sdk-ts, agent-sdk/0.3.285");
     expect(headers?.get("x-app")).toBe("cli");
     expect(headers?.get("x-claude-code-request-class")).toBe("main");
     expect(headers?.get("x-client-request-id")).toMatch(/^[0-9a-f-]{36}$/);
@@ -107,6 +107,37 @@ describe("account routing and quota", () => {
     expect(hasQuota(usageSchema.parse({ ...quota(), seven_day_overage_included: { utilization: 100, resets_at: null } }), "claude-fable-5")).toBe(false);
     const accounts = await setup(async () => Response.json({ error: "unavailable" }, { status: 503 }));
     expect((await handler(accounts)(makeRequest())).status).toBe(503);
+  });
+
+  test("usage-limit modes reach Anthropic and use their server-side quota semantics", async () => {
+    const seen: Headers[] = [];
+    const accounts = await setup(async (url, init) => {
+      if (new URL(url).pathname === "/api/oauth/usage")
+        return Response.json({ ...quota(100), seven_day: { utilization: 100, resets_at: null } });
+      const control = controlPlane(url, init);
+      if (control) return control;
+      seen.push(new Headers(init?.headers));
+      return Response.json({ id: "msg_test", content: [{ type: "text", text: "OK" }] },
+        { headers: { "request-id": "req_extended" } });
+    }, ["a"]);
+    const promptId = crypto.randomUUID();
+    const extended = await handler(accounts)(makeRequest(input,
+      { "anthropic-usage-limit": "extended", "x-claude-code-prompt-id": promptId }));
+    expect(extended.status).toBe(200);
+    expect(seen[0]?.get("anthropic-usage-limit")).toBe("extended");
+    expect(seen[0]?.get("x-claude-code-prompt-id")).toBe(promptId);
+
+    expect(hasQuota(usageSchema.parse(quota(100)), input.model, "slow")).toBe(true);
+    expect(hasQuota(usageSchema.parse({ ...quota(100), seven_day: { utilization: 100, resets_at: null } }), input.model, "slow")).toBe(false);
+    expect(hasQuota(usageSchema.parse({ ...quota(100), seven_day: { utilization: 100, resets_at: null } }), input.model, "extended")).toBe(true);
+  });
+
+  test("rejects unsupported usage-limit hints before contacting upstream", async () => {
+    let attempts = 0;
+    const accounts = await setup(async () => { attempts++; return Response.json({}); }, ["a"]);
+    expect((await handler(accounts)(makeRequest(input, { "anthropic-usage-limit": "unlimited" }))).status).toBe(400);
+    expect((await handler(accounts)(makeRequest(input, { "x-claude-code-prompt-id": "not-a-uuid" }))).status).toBe(400);
+    expect(attempts).toBe(0);
   });
 
   test("confirmed quota retries each account at most once, then cools down", async () => {
@@ -200,6 +231,45 @@ describe("account routing and quota", () => {
     accounts.limited("a", new Headers(headers), "claude-fable-5");
     expect(await accounts.choose(input.model)).toBe("a");
     await expect(accounts.choose("claude-fable-5")).rejects.toThrow("No account has quota");
+  });
+
+  test("slow-lane capacity waits stay on the client instead of rotating accounts", async () => {
+    let attempts = 0;
+    const accounts = await setup(async (url, init) => {
+      const control = controlPlane(url, init);
+      if (control) return control;
+      attempts++;
+      return Response.json({ type: "error", error: { type: "rate_limit_error", message: "capacity" } }, {
+        status: 429, headers: { ...quotaHeaders, "anthropic-ratelimit-unified-slow-status": "slot_busy",
+          "anthropic-ratelimit-unified-slow-retry-after": "20" },
+      });
+    });
+    const response = await handler(accounts)(makeRequest(input, { "anthropic-usage-limit": "slow" }));
+    expect(response.status).toBe(429);
+    expect(response.headers.get("anthropic-ratelimit-unified-slow-status")).toBe("slot_busy");
+    expect(attempts).toBe(1);
+  });
+
+  test("completed history pins later turns to the same randomly selected account", async () => {
+    const attempts: string[] = [];
+    let sequence = 0;
+    const accounts = await setup(async (url, init) => {
+      const control = controlPlane(url, init);
+      if (control) return control;
+      attempts.push(new Headers(init?.headers).get("authorization")!);
+      sequence++;
+      return Response.json({ id: `msg_${sequence}`, content: [{ type: "text", text: sequence === 1 ? "First" : "Second" }] },
+        { headers: { "request-id": `req_${sequence}` } });
+    });
+    const session = crypto.randomUUID();
+    const first = await handler(accounts)(makeRequest(input, { "x-claude-code-session-id": session }));
+    expect(first.status).toBe(200);
+    const continued: Message = { ...input, messages: [...input.messages,
+      { role: "assistant", content: "First" }, { role: "user", content: "Continue" }] };
+    const second = await handler(accounts)(makeRequest(continued, { "x-claude-code-session-id": session }));
+    expect(second.status).toBe(200);
+    expect(attempts).toHaveLength(2);
+    expect(attempts[1]).toBe(attempts[0]);
   });
 
   test("confirmed quota switches accounts and can return a successful stream", async () => {
@@ -311,7 +381,7 @@ test("OAuth uses PKCE S256 and rejects missing/mismatched state", () => {
 });
 
 test("billing fingerprint matches capture and previous request stays within account/session", async () => {
-  expect(fingerprint({ ...input, messages: [{ role: "user", content: "Perform the verification job now." }] })).toBe("80f");
+  expect(fingerprint({ ...input, messages: [{ role: "user", content: "Perform the verification job now." }] })).toBe("0c7");
   const billings: string[] = [];
   const diagnostics: unknown[] = [];
   let sequence = 0;

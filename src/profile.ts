@@ -2,9 +2,9 @@ import { createHash } from "node:crypto";
 import type { Message, Account } from "./schema.ts";
 import { applyCaching } from "./cache.ts";
 
-// Matched to the inspected Claude Code 2.1.280 / Agent SDK 0.3.280 build.
-export const CLI_VERSION = "2.1.280";
-export const USER_AGENT = `claude-cli/${CLI_VERSION} (external, sdk-ts, agent-sdk/0.3.280)`;
+// Matched to the inspected Claude Code 2.1.285 / Agent SDK 0.3.285 build.
+export const CLI_VERSION = "2.1.285";
+export const USER_AGENT = `claude-cli/${CLI_VERSION} (external, sdk-ts, agent-sdk/0.3.285)`;
 export const IDENTITY = "You are a Claude agent, built on Anthropic's Claude Agent SDK.";
 export const BASE_BETAS = ["oauth-2025-04-20", "interleaved-thinking-2025-05-14", "thinking-token-count-2026-05-13",
   "context-management-2025-06-27", "prompt-caching-scope-2026-01-05", "claude-code-20250219",

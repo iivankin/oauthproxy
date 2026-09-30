@@ -2,7 +2,11 @@ import { randomInt, randomBytes } from "node:crypto";
 import { AccountStore } from "./store.ts";
 import { Transport, UpstreamError, jsonResponse } from "./transport.ts";
 import { AppError, modelsPageSchema, profileSchema, usageSchema, safeAccount, type Tokens, type Usage, type Model, type Account, type Message, type Profile } from "./schema.ts";
-import { hasQuota, retryAt } from "./quota.ts";
+import { hasQuota, retryAt, type UsageLimitMode } from "./quota.ts";
+import { previousHistoryHash } from "./history.ts";
+
+type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string };
+type MessageHints = { usageLimit?: UsageLimitMode; gatewayPromptId?: string };
 
 export class Accounts {
   private usageCache = new Map<string, { until: number; value: Promise<Usage> }>();
@@ -76,8 +80,9 @@ export class Accounts {
     return this.authenticated(id, account => this.transport.request(account, path));
   }
 
-  message(id: string, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal) {
-    return this.authenticated(id, account => this.transport.message(account, input, sessionId, promptId, betas, signal));
+  message(id: string, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal,
+    hints: MessageHints = {}) {
+    return this.authenticated(id, account => this.transport.message(account, input, sessionId, promptId, betas, signal, hints));
   }
 
   usage(id: string, force = false): Promise<Usage> {
@@ -125,7 +130,15 @@ export class Accounts {
     }
   }
 
-  async choose(model: string, excluded = new Set<string>()) {
+  async continuationAccount(sessionId: string, input: Message): Promise<string | undefined> {
+    const hash = previousHistoryHash(input.messages);
+    if (!hash) return;
+    const ids = (await this.store.read()).accounts.filter(account => !account.disabled).map(account => account.id);
+    const records = await Promise.all(ids.map(id => this.transport.history.get(sessionId, id, hash)));
+    return ids[records.findIndex(Boolean)];
+  }
+
+  async choose(model: string, excluded = new Set<string>(), options: ChooseOptions = {}) {
     const accounts = (await this.store.read()).accounts.filter(account => !account.disabled && !excluded.has(account.id));
     if (!accounts.length) throw new AppError(503, "No available accounts; run accounts add");
     let failed = false;
@@ -134,7 +147,7 @@ export class Accounts {
       if ((this.modelCooldown.get(account.id)?.get(model) ?? 0) > Date.now()) return null;
       try {
         const usage = await this.usage(account.id);
-        if (!hasQuota(usage, model)) return null;
+        if (!hasQuota(usage, model, options.usageLimit)) return null;
         const models = await this.models(account.id);
         return models.some(item => item.id === model) ? account.id : null;
       } catch { failed = true; return null; }
@@ -142,6 +155,7 @@ export class Accounts {
     const eligible = candidates.filter(id => id !== null);
     if (!eligible.length) throw new AppError(failed ? 503 : 429,
       failed ? "Cannot verify account quota or models" : "No account has quota for this model (or model unavailable)");
+    if (options.preferredId && eligible.includes(options.preferredId)) return options.preferredId;
     return eligible[randomInt(eligible.length)]!;
   }
 

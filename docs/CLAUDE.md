@@ -9,6 +9,8 @@ Headers:
 - `Content-Type: application/json`.
 - `Authorization: Bearer <PROXY_API_KEY>` or `x-api-key`, if configured.
 - `x-claude-code-session-id: <UUID>`: reuse across turns. If missing, the proxy warns, generates one and returns it.
+- `x-claude-code-prompt-id: <UUID>`: optional gateway hint; when supplied, it is also used by the billing metadata.
+- `anthropic-usage-limit: extended|slow`: forwards Claude Code's server-controlled wrap-up or lower-priority mode.
 - `anthropic-beta`: merged with body `betas` and the proxy's default flags.
 
 The proxy uses `@anthropic-ai/sdk` with retries disabled. It adds the Agent SDK identity and billing line to `system`, account/session metadata, and previous-message diagnostics. It does not add built-in tools, email context or title generation.
@@ -25,7 +27,9 @@ Upstream status, error bodies, request IDs, retry/quota/refusal headers and unkn
 
 ## Routing and retries
 
-Each request randomly selects an account with verified quota and model access. A session ID does **not** pin an account. Quota is cached for 30 seconds; models for five minutes.
+The first request randomly selects an account with verified quota and model access. Completed history pins later turns to that account through the CAS, including after a restart and compaction. Confirmed quota exhaustion can switch the turn to another eligible account. Quota and models are cached for five minutes.
+
+`extended` lets Anthropic decide whether an in-progress turn has a short grace window across its normal usage boundary. `slow` may cross the session limit but still requires weekly quota. Slow-lane `slot_busy` responses are returned to the client with their retry headers instead of rotating accounts.
 
 The proxy retries only:
 
