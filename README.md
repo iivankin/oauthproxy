@@ -36,6 +36,8 @@ bun run build
 
 Client contracts and limitations: [Claude](docs/CLAUDE.md) · [Codex](docs/CODEX.md) · [ChatGPT plan](docs/CHATGPT.md).
 
+License: [Apache-2.0](LICENSE).
+
 ## Docker
 
 ```sh

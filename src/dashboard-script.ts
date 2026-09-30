@@ -27,6 +27,58 @@ export const dashboardScript = `(() => {
   });
   const accountLabel = data => data?.account?.email || data?.account?.name || "Account connected";
 
+  const modelsButton = byId("models-toggle");
+  const modelsList = byId("models-list");
+  let modelsLoaded = false;
+  modelsButton.addEventListener("click", async () => {
+    if (!modelsList.hidden) {
+      modelsList.hidden = true;
+      modelsButton.textContent = "Show models";
+      return;
+    }
+    modelsList.hidden = false;
+    modelsButton.textContent = "Hide models";
+    if (modelsLoaded) return;
+    modelsButton.disabled = true;
+    modelsList.textContent = "Loading…";
+    const providers = [
+      ["Claude", "/claude/v1/models"],
+      ["Codex", "/codex/v1/models"],
+      ["ChatGPT plan", "/chatgpt/v1/models"],
+    ];
+    const results = await Promise.allSettled(providers.map(([, path]) => request(path)));
+    modelsList.replaceChildren();
+    for (let index = 0; index < providers.length; index++) {
+      const section = document.createElement("section");
+      section.className = "model-group";
+      const heading = document.createElement("h3");
+      heading.textContent = providers[index][0];
+      section.append(heading);
+      const result = results[index];
+      if (result.status === "rejected") {
+        const message = document.createElement("small");
+        message.textContent = result.reason?.message || "Models unavailable";
+        section.append(message);
+      } else {
+        const raw = result.value?.data || result.value?.models || [];
+        const models = raw.filter(model => model && (index !== 2 || model.visibility === "list"));
+        if (!models.length) {
+          const message = document.createElement("small");
+          message.textContent = "No available models";
+          section.append(message);
+        }
+        for (const model of models) {
+          const label = document.createElement("code");
+          label.textContent = model.slug || model.id;
+          section.append(label);
+        }
+      }
+      modelsList.append(section);
+    }
+    modelsLoaded = true;
+    modelsButton.disabled = false;
+  });
+
   byId("claude-oauth-start").addEventListener("click", async () => {
     busy = true;
     status("claude", "Starting…");

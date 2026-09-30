@@ -25,7 +25,19 @@ Use `GET /chatgpt/v1/models` for available model slugs. HTTP requests go to `POS
 {"model":"<available-model>","input":[{"role":"user","content":"Hello"}],"stream":true}
 ```
 
-The proxy sets `store: false` and `stream: true`. Send the complete history in `input` on every HTTP turn; `previous_response_id` is rejected. It forwards SSE events and upstream errors. A confirmed `subscription_sharing_usage_limit_exceeded` temporarily removes that account from random selection; other 429 responses pass through without changing account selection.
+The proxy sets `store: false` and `stream: true`. Send the complete history in `input` on every HTTP turn; `previous_response_id` is rejected. It forwards upstream status, error body (`error.code` and `error.param`), and SSE events without rewriting them. On a 401 it refreshes the token once, then forwards a remaining 401. A confirmed `subscription_sharing_usage_limit_exceeded` temporarily removes that account from random selection; other 429 responses pass through without changing account selection.
+
+The client must distinguish `response.completed` from `response.failed`, `response.incomplete`, and an interrupted stream. For [structured sharing errors](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery#structured-responses-errors):
+
+| Error code | Client action |
+| --- | --- |
+| `subscription_sharing_usage_limit_exceeded` | Pause plan requests; open ChatGPT Usage. |
+| `subscription_sharing_usage_unavailable`, `subscription_sharing_user_unavailable` | Retry later with bounded backoff; keep credentials. |
+| `subscription_sharing_user_not_eligible` | Stop; user/workspace/policy is not eligible. |
+| `subscription_sharing_unsupported_capability` | Correct the input indicated by `error.param`; do not retry unchanged. |
+| `subscription_sharing_route_not_supported` | Correct the method or endpoint. |
+| `subscription_sharing_invalid_user` | Diagnose the credential context; reauthorize only after confirmed revocation or terminal refresh failure. |
+| `chatpass_v2_scope_not_authorized`, `chatpass_v2_invalid_authorization_context` | Check the OAuth client and grant. |
 
 `WS /chatgpt/v1/responses` selects one account for the connection and forwards Responses WebSocket events. Send `response.create` frames with an `input` array and `model`; the proxy sets `store: false`. WebSocket continuation can use `previous_response_id` only for responses created on that connection. See the [WebSocket protocol](https://developers.openai.com/api/docs/guides/websocket-mode).
 

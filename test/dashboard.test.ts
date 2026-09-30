@@ -38,6 +38,9 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(html).not.toContain("WS  /v1/responses?model=");
   expect(html).toContain('id="claude-oauth-start"');
   expect(html).toContain('id="codex-oauth-start"');
+  expect(html).toContain('id="models-toggle"');
+  expect(html).toContain('id="models-list"');
+  expect(html).toContain('/chatgpt/v1/models');
   expect(html).toContain("/admin/claude/oauth/complete");
   expect(html).toContain("100%");
   expect(html).toContain("5h");

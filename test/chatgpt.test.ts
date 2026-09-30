@@ -139,6 +139,23 @@ test("combined server exposes separate ChatGPT routes and pins a WebSocket to on
   const base = proxy.url.toString();
   expect((await fetch(`${base}chatgpt/v1/models`, { headers: { authorization: "Bearer local-key" } })).status).toBe(200);
   expect((await fetch(`${base}chatgpt/v1/models`)).status).toBe(401);
+  const dashboard = await (await fetch(`${base}dashboard`)).text();
+  expect(dashboard).toContain('&quot;model&quot;:&quot;shared-model&quot;');
+  expect(dashboard).not.toContain('MODEL_FROM_/chatgpt/v1/models');
+  const errorBody = JSON.stringify({ error: { code: "subscription_sharing_unsupported_capability",
+    param: "tools", message: "Unsupported tool" } });
+  f.setResponse(400, errorBody);
+  const rejected = await fetch(`${base}chatgpt/v1/responses`, { method: "POST",
+    headers: { authorization: "Bearer local-key", "content-type": "application/json" },
+    body: JSON.stringify({ model: "shared-model", input: [] }) });
+  expect(rejected.status).toBe(400);
+  expect(await rejected.text()).toBe(errorBody);
+  f.setResponse(200, 'event: response.failed\ndata: {"type":"response.failed","response":{"error":{"code":"subscription_sharing_user_unavailable"}}}\n\n');
+  const streamed = await fetch(`${base}chatgpt/v1/responses`, { method: "POST",
+    headers: { authorization: "Bearer local-key", "content-type": "application/json" },
+    body: JSON.stringify({ model: "shared-model", input: [] }) });
+  expect(streamed.status).toBe(200);
+  expect(await streamed.text()).toContain("subscription_sharing_user_unavailable");
   const socket = new WebSocket(`${base.replace("http", "ws")}chatgpt/v1/responses`, {
     headers: { authorization: "Bearer local-key" },
   });

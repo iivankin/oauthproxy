@@ -25,7 +25,12 @@ function account(row: DashboardAccount) {
 
 export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: Stats, key?: string,
   origin = "http://127.0.0.1:3000", chatgpt?: ChatGPTAccounts) {
-  const { accounts, errors } = await dashboardAccounts(claude, codex, chatgpt);
+  const [{ accounts, errors }, chatgptCatalog] = await Promise.all([
+    dashboardAccounts(claude, codex, chatgpt), chatgpt?.catalog().catch(() => null),
+  ]);
+  const chatgptModel = chatgptCatalog?.models.find(model =>
+    model.visibility === "list" && /^[\w.:-]+$/.test(model.slug))?.slug
+    ?? "MODEL_FROM_/chatgpt/v1/models";
   const counters = stats.snapshot();
   const sum = (key: "total" | "active" | "errors") => counters.reduce((n, row) => n + row[key], 0);
   const rows = counters.map(row => {
@@ -47,7 +52,7 @@ export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: S
   const chatgptRequest = `curl '${origin}/chatgpt/v1/responses' \\
   -H '${authorization}' \\
   -H 'Content-Type: application/json' \\
-  -d '{"model":"<model-from-/chatgpt/v1/models>","input":[{"role":"user","content":"Hello"}],"stream":true}'`;
+  -d '${JSON.stringify({ model: chatgptModel, input: [{ role: "user", content: "Hello" }], stream: true })}'`;
   return new Response(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OAuth Proxy</title>
@@ -63,6 +68,7 @@ small,.muted{display:block;color:#94a0a9;font-size:12px;line-height:1.6}header s
 .status{font-size:12px;color:#d8b783;white-space:nowrap}.status.ok{color:#a4d1b9}.quotas{width:37%;min-width:250px}.quota+.quota{margin-top:15px}.quota-label{display:flex;justify-content:space-between;gap:18px;font-size:12px;color:#bec8cf}progress{display:block;width:100%;height:5px;border:0;border-radius:4px;overflow:hidden;margin:8px 0;background:#2b3439;accent-color:#8cbea4}progress::-webkit-progress-bar{background:#2b3439}progress::-webkit-progress-value{background:#8cbea4}progress.limited::-webkit-progress-value{background:#d8a775}.empty{color:#94a0a9;padding:24px 0}.error{color:#d8b783}footer{margin-top:20px}
 .connection{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;border-top:1px solid #293035;border-bottom:1px solid #293035;padding:16px 0;margin-bottom:20px}.connection dt{color:#94a0a9}.connection dd{margin:0;overflow-wrap:anywhere}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}code{color:#c4ddd0}pre{margin:0;padding:16px 0;border-top:1px solid #293035;color:#cbd4d9;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}.examples{display:grid;grid-template-columns:1fr 1fr;gap:28px}.examples h3{font-size:13px;font-weight:550;margin:0 0 10px}
 .oauth{display:grid;grid-template-columns:1fr 1fr;gap:28px}.oauth section{border-top:1px solid #293035;padding-top:16px}.oauth h3{font-size:13px;font-weight:550;margin:0 0 14px}.oauth label{display:block;color:#94a0a9;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:12px 0 6px}.oauth input{width:100%;border:1px solid #374047;border-radius:4px;background:#151a1d;color:#e6eaed;padding:9px 10px;font:inherit}.actions{display:flex;align-items:center;gap:10px;margin-top:12px}.oauth button{border:1px solid #486052;border-radius:4px;background:#1b2821;color:#c4ddd0;padding:8px 12px;font:inherit;cursor:pointer}.oauth button:disabled{opacity:.45;cursor:default}.oauth a{padding:7px 11px}.oauth output{display:block;min-height:20px;margin-top:10px;color:#a4d1b9;font-size:12px}.oauth output.error{color:#d8b783}.device-code{display:inline-block;margin-top:12px;font-size:18px;letter-spacing:.08em}
+.model-heading{display:flex;align-items:center;gap:16px}.model-heading h2{margin-right:auto}.model-heading button{border:1px solid #486052;border-radius:4px;background:#1b2821;color:#c4ddd0;padding:8px 12px;font:inherit;cursor:pointer}.model-group{border-top:1px solid #293035;padding:14px 0}.model-group h3{font-size:13px;margin:0 0 8px}.model-group code{display:inline-block;margin:0 12px 8px 0}.model-group small{margin:0}
 @media(max-width:640px){main{padding:24px 16px}.summary{gap:0;justify-content:space-between}.summary strong{font-size:24px}td{padding-right:20px}.quotas{min-width:220px}.examples,.oauth{grid-template-columns:1fr}}
 </style></head><body><main data-api-key="${escape(key ?? "")}">
 <header><div><h1>OAuth Proxy</h1><small>${escape(date(new Date().toISOString()))} · Refreshes every 30s</small></div><a href="/dashboard">Refresh</a></header>
@@ -85,6 +91,8 @@ ${rows || '<tr><td colspan="8" class="empty">No traffic yet</td></tr>'}</tbody><
 <label for="chatgpt-callback-url">Final 127.0.0.1 callback URL</label><input id="chatgpt-callback-url" autocomplete="off" placeholder="http://127.0.0.1:1455/auth/callback?code=...">
 <div class="actions"><button id="chatgpt-oauth-complete" type="button" disabled>Complete OAuth</button></div><output id="chatgpt-oauth-status"></output></section>
 </div>
+<div class="model-heading"><h2>Available models</h2><button id="models-toggle" type="button">Show models</button></div>
+<div id="models-list" hidden></div>
 <h2>API</h2>
 <dl class="connection"><dt>Base URL</dt><dd><code>${escape(origin)}</code></dd><dt>API key</dt><dd><code>${escape(key ?? "Not configured")}</code></dd></dl>
 <div class="examples"><section><h3>Claude · POST /v1/messages</h3><pre><code>${escape(claudeRequest)}</code></pre></section>
