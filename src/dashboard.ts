@@ -1,5 +1,6 @@
 import type { Accounts } from "./accounts.ts";
 import type { Accounts as CodexAccounts } from "./codex/accounts.ts";
+import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
 import { dashboardAccounts, type DashboardAccount, type Quota } from "./dashboard-data.ts";
 import { dashboardScript } from "./dashboard-script.ts";
 import type { Stats } from "./stats.ts";
@@ -18,11 +19,13 @@ function quota(row: Quota) {
 function account(row: DashboardAccount) {
   return `<tr><td><strong>${escape(row.name)}</strong><small>${escape(row.identity)}</small></td>
     <td>${row.provider}</td><td>${escape(row.tier ?? "—")}</td><td><span class="status ${row.status === "Connected" ? "ok" : ""}">${escape(row.status)}</span></td>
-    <td class="quotas">${row.quotas.map(quota).join("") || "—"}</td></tr>`;
+    <td class="quotas">${row.quotas.map(quota).join("") || (row.provider === "ChatGPT"
+      ? '<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">ChatGPT Usage</a>' : "—")}</td></tr>`;
 }
 
-export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: Stats, key?: string, origin = "http://127.0.0.1:3000") {
-  const { accounts, errors } = await dashboardAccounts(claude, codex);
+export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: Stats, key?: string,
+  origin = "http://127.0.0.1:3000", chatgpt?: ChatGPTAccounts) {
+  const { accounts, errors } = await dashboardAccounts(claude, codex, chatgpt);
   const counters = stats.snapshot();
   const sum = (key: "total" | "active" | "errors") => counters.reduce((n, row) => n + row[key], 0);
   const rows = counters.map(row => {
@@ -41,6 +44,10 @@ export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: S
   -H 'Content-Type: application/json' \\
   -H 'session-id: example-session' \\
   -d '{"model":"gpt-6-sol","input":[{"role":"user","content":[{"type":"input_text","text":"Hello"}]}],"store":false,"stream":true}'`;
+  const chatgptRequest = `curl '${origin}/chatgpt/v1/responses' \\
+  -H '${authorization}' \\
+  -H 'Content-Type: application/json' \\
+  -d '{"model":"<model-from-/chatgpt/v1/models>","input":[{"role":"user","content":"Hello"}],"stream":true}'`;
   return new Response(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OAuth Proxy</title>
@@ -73,15 +80,21 @@ ${rows || '<tr><td colspan="8" class="empty">No traffic yet</td></tr>'}</tbody><
 <section><h3>Codex</h3><label for="codex-account-name">Label</label><input id="codex-account-name" autocomplete="off" placeholder="Optional">
 <div class="actions"><button id="codex-oauth-start" type="button">Start OAuth</button><a id="codex-oauth-link" target="_blank" rel="noreferrer" hidden>Open sign-in</a></div>
 <code id="codex-user-code" class="device-code"></code><div class="actions"><button id="codex-oauth-complete" type="button" disabled>Check status</button></div><output id="codex-oauth-status"></output></section>
+<section><h3>ChatGPT plan</h3><label for="chatgpt-account-name">Label</label><input id="chatgpt-account-name" autocomplete="off" placeholder="Optional">
+<div class="actions"><button id="chatgpt-oauth-start" type="button">Start OAuth</button><a id="chatgpt-oauth-link" target="_blank" rel="noreferrer" hidden>Open sign-in</a></div>
+<label for="chatgpt-callback-url">Final 127.0.0.1 callback URL</label><input id="chatgpt-callback-url" autocomplete="off" placeholder="http://127.0.0.1:1455/auth/callback?code=...">
+<div class="actions"><button id="chatgpt-oauth-complete" type="button" disabled>Complete OAuth</button></div><output id="chatgpt-oauth-status"></output></section>
 </div>
 <h2>API</h2>
 <dl class="connection"><dt>Base URL</dt><dd><code>${escape(origin)}</code></dd><dt>API key</dt><dd><code>${escape(key ?? "Not configured")}</code></dd></dl>
 <div class="examples"><section><h3>Claude · POST /v1/messages</h3><pre><code>${escape(claudeRequest)}</code></pre></section>
-<section><h3>Codex · POST /v1/responses (SSE)</h3><pre><code>${escape(codexRequest)}</code></pre></section></div>
+<section><h3>Codex legacy · POST /v1/responses (SSE)</h3><pre><code>${escape(codexRequest)}</code></pre></section>
+<section><h3>ChatGPT plan · POST /chatgpt/v1/responses (SSE)</h3><pre><code>${escape(chatgptRequest)}</code></pre></section></div>
 <pre><code>GET /claude/v1/models     GET /claude/accounts
 GET /codex/v1/models      GET /codex/accounts
 GET /codex/usage?account=&lt;id&gt;
-WS  /v1/responses</code></pre>
+GET /chatgpt/v1/models    GET /chatgpt/accounts
+WS  /v1/responses         WS  /chatgpt/v1/responses</code></pre>
 <footer><small>Since ${escape(date(stats.since.toISOString()))} · In memory · Per-account attempts<br>HTTP: completed 2xx streams, non-2xx / transport errors. WS: connections, not model turns. In-stream model errors are not counted.</small></footer>
 </main><script>${dashboardScript}</script></body></html>`, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": "no-store, no-transform",

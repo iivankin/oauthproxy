@@ -13,7 +13,8 @@ export class NativeRelay {
   private ended?: { code: number; reason: string };
   onClose = () => {};
 
-  constructor(readonly upstream: WebSocket, readonly limit = BUFFER_LIMIT) {
+  constructor(readonly upstream: WebSocket, readonly limit = BUFFER_LIMIT,
+    readonly transform?: (frame: Frame) => Frame, readonly observe?: (frame: Frame) => void) {
     upstream.on("message", (data, binary) => {
       const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.isBuffer(data) ? data : Buffer.from(new Uint8Array(data));
       this.receive(binary ? bytes : bytes.toString());
@@ -40,6 +41,7 @@ export class NativeRelay {
 
   private receive(frame: Frame) {
     if (this.ended) return;
+    this.observe?.(frame);
     const size = Buffer.byteLength(frame);
     if (size > this.limit) { this.overflow(); return; }
     if (!this.client) {
@@ -54,6 +56,8 @@ export class NativeRelay {
   }
 
   send(frame: Frame) {
+    try { frame = this.transform?.(frame) ?? frame; }
+    catch { this.client?.close(1008, "Invalid response.create event"); return; }
     if (this.upstream.readyState !== WebSocket.OPEN) { this.client?.close(1011, "Upstream is not open"); return; }
     if (Buffer.byteLength(frame) + this.upstream.bufferedAmount > this.limit) { this.overflow(); return; }
     this.upstream.send(frame, { binary: typeof frame !== "string" }, error => {

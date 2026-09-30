@@ -10,6 +10,11 @@ import { authorized, handler } from "./proxy.ts";
 import { Stats } from "./stats.ts";
 import { dashboard } from "./dashboard.ts";
 import { AdminApi } from "./admin.ts";
+import { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
+import { AccountStore as ChatGPTStore } from "./chatgpt/store.ts";
+import { Transport as ChatGPTTransport } from "./chatgpt/transport.ts";
+import { chatgptHttp, streamResponses as chatgptResponses, upgrade as chatgptUpgrade,
+  upstreamError as chatgptError } from "./chatgpt/proxy.ts";
 
 function publicOrigin(request: Request, url: URL) {
   const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();
@@ -19,11 +24,12 @@ function publicOrigin(request: Request, url: URL) {
 }
 
 export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, key?: string,
-  codex = new CodexAccounts(new CodexStore(), new CodexTransport())) {
+  codex = new CodexAccounts(new CodexStore(), new CodexTransport()),
+  chatgpt = new ChatGPTAccounts(new ChatGPTStore(), new ChatGPTTransport())) {
   if (!["127.0.0.1", "localhost", "::1"].includes(hostname) && !key)
     throw new Error("Set PROXY_API_KEY before binding a non-loopback interface");
   const stats = new Stats();
-  const admin = new AdminApi(accounts, codex);
+  const admin = new AdminApi(accounts, codex, chatgpt);
   const claude = handler(accounts, key, stats);
   const server = Bun.serve<NativeRelay>({
     hostname, port, idleTimeout: 0, maxRequestBodySize: MAX_PAYLOAD,
@@ -33,7 +39,7 @@ export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, k
       const origin = publicOrigin(request, url);
       // Deliberately public; protect this route at the reverse proxy when exposing the server.
       if (path === "/dashboard" && request.method === "GET") {
-        return dashboard(accounts, codex, stats, key, origin);
+        return dashboard(accounts, codex, stats, key, origin, chatgpt);
       }
       if (path.startsWith("/admin/") && !key)
         return proxyError(503, "Set PROXY_API_KEY to enable admin routes");
@@ -43,11 +49,14 @@ export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, k
         return proxyError(403, "Browser origins are not supported");
       try {
         if (path.startsWith("/admin/")) return await admin.handle(request);
+        if (path === "/chatgpt/v1/responses") return request.method === "POST"
+          ? await chatgptResponses(chatgpt, request, stats) : await chatgptUpgrade(chatgpt, request, server, stats);
+        if (path.startsWith("/chatgpt/")) return await chatgptHttp(chatgpt, request);
         if (path === "/v1/responses") return request.method === "POST"
           ? await streamResponses(codex, request, stats) : await upgrade(codex, request, server, stats);
         if (path.startsWith("/codex/")) return await codexHttp(codex, request);
         return claude(request);
-      } catch (error) { return upstreamError(error); }
+      } catch (error) { return path.startsWith("/chatgpt/") ? chatgptError(error) : upstreamError(error); }
     },
     websocket: {
       maxPayloadLength: MAX_PAYLOAD, backpressureLimit: MAX_PAYLOAD, closeOnBackpressureLimit: true,

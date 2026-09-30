@@ -1,13 +1,14 @@
 # OAuth Proxy
 
-One Bun server for Claude and Codex, with multi-account OAuth, token refresh, quota checks, and random eligible-account selection.
+One Bun server for Claude, legacy Codex, and ChatGPT plan sharing.
 
 - `POST /v1/messages` — Claude JSON/SSE.
 - `POST /v1/responses` — Codex SSE over native HTTPS.
 - `WS /v1/responses` — Codex WebSocket forwarding; one account per connection.
-- Provider models and accounts: `/claude/v1/models`, `/codex/v1/models`, `/claude/accounts`, `/codex/accounts`.
+- `POST` and `WS /chatgpt/v1/responses` — Sign in with ChatGPT through the public Responses API.
+- Provider models and accounts: `/claude/...`, `/codex/...`, `/chatgpt/...`.
 - `GET /dashboard` — public HTML dashboard: accounts, quotas, in-memory HTTP/WS transport counters. No authentication, even with `PROXY_API_KEY`; restrict access in nginx. Refreshes every 30s.
-- Admin OAuth: `POST /admin/{claude,codex}/oauth/start`, Claude `POST /admin/claude/oauth/complete`, and `GET /admin/oauth/<flow-id>`. These routes require `PROXY_API_KEY`; credentials are saved server-side and never returned.
+- Admin OAuth: `POST /admin/{claude,codex,chatgpt}/oauth/start`, `POST /admin/{claude,chatgpt}/oauth/complete`, and `GET /admin/oauth/<flow-id>`. These routes require `PROXY_API_KEY`; credentials stay server-side.
 
 ## Quick start
 
@@ -17,12 +18,13 @@ Requires Bun 1.4.0 or later.
 bun install --frozen-lockfile
 bun run cli claude accounts add --name personal
 bun run cli codex accounts add --name personal
+bun run cli chatgpt accounts add --name personal
 PROXY_API_KEY='your-local-secret' bun start
 ```
 
 Only add accounts for the providers you use. The server listens on `127.0.0.1:3000`. Authenticate with `Authorization: Bearer <PROXY_API_KEY>` or `x-api-key`.
 
-Credentials are stored unencrypted with `0600` permissions in `accounts.json` and `codex-accounts.json` in the working directory. Keep them private. Use a TLS reverse proxy for remote access.
+Credentials are stored unencrypted with `0600` permissions in `accounts.json`, `codex-accounts.json`, and `chatgpt-accounts.json` in the working directory. Keep them private. Use a TLS reverse proxy for remote access.
 
 ## Development
 
@@ -32,7 +34,7 @@ bun test
 bun run build
 ```
 
-Client contracts and limitations: [Claude](docs/CLAUDE.md) · [Codex](docs/CODEX.md).
+Client contracts and limitations: [Claude](docs/CLAUDE.md) · [Codex](docs/CODEX.md) · [ChatGPT plan](docs/CHATGPT.md).
 
 ## Docker
 

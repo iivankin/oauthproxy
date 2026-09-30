@@ -4,15 +4,20 @@ import type { Accounts as CodexAccounts } from "./codex/accounts.ts";
 import { createLogin, validateCode } from "./oauth.ts";
 import { OAUTH } from "./transport.ts";
 import { finishDeviceLogin, startDeviceLogin, type DeviceLogin } from "./codex/oauth.ts";
+import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
+import { begin as beginChatGPT, callbackCode, complete as completeChatGPT, type Login as ChatGPTLogin } from "./chatgpt/oauth.ts";
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(100).optional() }).strict();
 const completeSchema = z.object({ flowId: z.uuid(), code: z.string().min(1).max(4096) }).strict();
+const chatgptStartSchema = z.object({ name: z.string().trim().min(1).max(100).optional(), accountId: z.uuid().optional() }).strict();
+const chatgptCompleteSchema = z.object({ flowId: z.uuid(), callbackUrl: z.url().max(8192) }).strict();
 type SafeAccount = Record<string, unknown>;
 type ClaudeFlow = { provider: "claude"; status: "pending"; expiresAt: number; name?: string;
   verifier: string; state: string; redirectUri: string; authorizationUrl: string };
 type CodexFlow = { provider: "codex"; status: "pending" | "completed" | "failed"; expiresAt: number;
   verificationUrl: string; userCode: string; device: DeviceLogin; account?: SafeAccount; error?: string };
-type Flow = ClaudeFlow | CodexFlow;
+type ChatGPTFlow = { provider: "chatgpt"; status: "pending"; expiresAt: number; login: ChatGPTLogin };
+type Flow = ClaudeFlow | CodexFlow | ChatGPTFlow;
 
 function jsonError(status: number, message: string) {
   return Response.json({ error: { type: "admin_error", message } },
@@ -31,7 +36,8 @@ async function body<T>(request: Request, schema: z.ZodType<T>) {
 
 export class AdminApi {
   private readonly flows = new Map<string, Flow>();
-  constructor(private readonly claude: Accounts, private readonly codex: CodexAccounts) {}
+  constructor(private readonly claude: Accounts, private readonly codex: CodexAccounts,
+    private readonly chatgpt?: ChatGPTAccounts) {}
 
   private save(id: string, flow: Flow) {
     this.flows.set(id, flow);
@@ -43,6 +49,7 @@ export class AdminApi {
     const common = { flowId: id, provider: flow.provider, status: flow.status,
       expiresAt: new Date(flow.expiresAt).toISOString() };
     if (flow.provider === "claude") return common;
+    if (flow.provider === "chatgpt") return common;
     return { ...common, verificationUrl: flow.verificationUrl, userCode: flow.userCode,
       ...(flow.account && { account: flow.account }), ...(flow.error && { error: flow.error }) };
   }
@@ -88,6 +95,33 @@ export class AdminApi {
           .catch(() => { flow.status = "failed"; flow.error = "OAuth login failed or expired"; });
         return Response.json(this.publicFlow(id, flow), { status: 201, headers: { "cache-control": "no-store" } });
       }
+      if (request.method === "POST" && url.pathname === "/admin/chatgpt/oauth/start") {
+        if (!this.chatgpt) return jsonError(503, "ChatGPT provider unavailable");
+        const input = await body(request, chatgptStartSchema);
+        const previous = input.accountId
+          ? (await this.chatgpt.store.read()).accounts.find(account => account.id === input.accountId) : undefined;
+        if (input.accountId && !previous) return jsonError(404, "ChatGPT account not found");
+        // The browser runs on the user's machine, so the loopback callback is pasted into /complete.
+        const login = await beginChatGPT(this.chatgpt.store, this.chatgpt.transport, 1455, input.name, previous);
+        const id = crypto.randomUUID(), expiresAt = Date.now() + 15 * 60_000;
+        this.save(id, { provider: "chatgpt", status: "pending", expiresAt, login });
+        return Response.json({ flowId: id, provider: "chatgpt", status: "pending",
+          authorizationUrl: login.url, expiresAt: new Date(expiresAt).toISOString() },
+        { status: 201, headers: { "cache-control": "no-store" } });
+      }
+      if (request.method === "POST" && url.pathname === "/admin/chatgpt/oauth/complete") {
+        if (!this.chatgpt) return jsonError(503, "ChatGPT provider unavailable");
+        const input = await body(request, chatgptCompleteSchema);
+        const flow = this.flows.get(input.flowId);
+        if (!flow || flow.provider !== "chatgpt") return jsonError(404, "OAuth flow not found");
+        if (flow.expiresAt <= Date.now()) { this.flows.delete(input.flowId); return jsonError(410, "OAuth flow expired"); }
+        callbackCode(flow.login, input.callbackUrl);
+        this.flows.delete(input.flowId); // A callback code is one-use even when exchange fails.
+        const result = await completeChatGPT(this.chatgpt.transport, flow.login, input.callbackUrl);
+        const account = await this.chatgpt.add(result.tokens, result.identity, result.clientId, flow.login.name);
+        return Response.json({ flowId: input.flowId, provider: "chatgpt", status: "completed", account },
+          { headers: { "cache-control": "no-store" } });
+      }
       const match = request.method === "GET" && url.pathname.match(/^\/admin\/oauth\/([0-9a-f-]{36})$/i);
       if (match) {
         const flow = this.flows.get(match[1]!);
@@ -98,7 +132,11 @@ export class AdminApi {
       return jsonError(404, "Not found");
     } catch (error) {
       if (error instanceof Error && ["Content-Type must be application/json", "Invalid JSON", "Invalid request body",
-        "OAuth state mismatch or missing authorization code", "Conflicting OAuth state"].includes(error.message))
+        "OAuth state mismatch or missing authorization code", "Conflicting OAuth state",
+        "Paste the full callback URL", "OAuth callback URL does not match this login",
+        "OAuth state mismatch", "OAuth callback has no code",
+        "OAuth callback has no matching issued client ID", "OAuth account identity changed",
+        "ChatGPT plan usage was not authorized"].includes(error.message))
         return jsonError(400, error.message);
       console.warn("Admin OAuth operation failed");
       return jsonError(502, "OAuth operation failed");

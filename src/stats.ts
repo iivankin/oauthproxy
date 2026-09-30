@@ -1,4 +1,4 @@
-export type Provider = "Claude" | "Codex";
+export type Provider = "Claude" | "Codex" | "ChatGPT";
 type Outcome = "completed" | "errors" | "cancelled";
 export type Counter = {
   provider: Provider; account: string; transport: "HTTP" | "WS";

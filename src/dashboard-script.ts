@@ -5,6 +5,7 @@ export const dashboardScript = `(() => {
   let claudeFlow = null;
   let codexFlow = null;
   let codexTimer = null;
+  let chatgptFlow = null;
 
   const byId = id => document.getElementById(id);
   const status = (provider, message, error = false) => {
@@ -96,11 +97,37 @@ export const dashboardScript = `(() => {
   });
   byId("codex-oauth-complete").addEventListener("click", checkCodex);
 
+  byId("chatgpt-oauth-start").addEventListener("click", async () => {
+    busy = true;
+    status("chatgpt", "Starting…");
+    try {
+      chatgptFlow = await post("/admin/chatgpt/oauth/start", { name: byId("chatgpt-account-name").value.trim() || undefined });
+      const link = byId("chatgpt-oauth-link");
+      link.href = chatgptFlow.authorizationUrl;
+      link.hidden = false;
+      byId("chatgpt-oauth-complete").disabled = false;
+      status("chatgpt", "Sign-in ready");
+    } catch (error) { status("chatgpt", error.message, true); }
+  });
+  byId("chatgpt-oauth-complete").addEventListener("click", async () => {
+    if (!chatgptFlow) return;
+    status("chatgpt", "Completing…");
+    try {
+      const data = await post("/admin/chatgpt/oauth/complete", {
+        flowId: chatgptFlow.flowId, callbackUrl: byId("chatgpt-callback-url").value.trim(),
+      });
+      chatgptFlow = null;
+      status("chatgpt", accountLabel(data));
+      setTimeout(() => location.reload(), 700);
+    } catch (error) { status("chatgpt", error.message, true); }
+  });
+
   if (!token) {
     busy = true;
     for (const button of document.querySelectorAll(".oauth button")) button.disabled = true;
     status("claude", "PROXY_API_KEY is not configured", true);
     status("codex", "PROXY_API_KEY is not configured", true);
+    status("chatgpt", "PROXY_API_KEY is not configured", true);
   }
   setTimeout(() => { if (!busy) location.reload(); }, 30000);
 })();`;

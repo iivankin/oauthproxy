@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Accounts } from "./accounts.ts";
 import type { Accounts as CodexAccounts } from "./codex/accounts.ts";
+import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
 import type { Usage as CodexUsage } from "./codex/schema.ts";
 import type { Provider } from "./stats.ts";
 
@@ -47,9 +48,9 @@ function codexQuotas(usage: CodexUsage): Quota[] {
   });
 }
 
-export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts) {
+export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts, chatgpt?: ChatGPTAccounts) {
   const errors: string[] = [];
-  const [claudeRows, codexRows] = await Promise.all([
+  const [claudeRows, codexRows, chatgptRows] = await Promise.all([
     claude.status().then(rows => rows.map((account): DashboardAccount => ({
       provider: "Claude", id: account.id, name: account.name, identity: account.email,
       tier: account.subscriptionType ? subscriptionTier(account.subscriptionType) : undefined,
@@ -76,6 +77,11 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts) 
       } catch { row.status = "Quota unavailable"; }
       return row;
     }))).catch(() => { errors.push("Codex accounts unavailable"); return []; }),
+    chatgpt ? chatgpt.status().then(rows => rows.map((account): DashboardAccount => ({
+      provider: "ChatGPT", id: account.id, name: account.name, identity: account.email ?? account.subject,
+      status: account.disabled ? "Disabled" : account.limitedUntil && account.limitedUntil > Date.now() ? "Limited" : "Connected",
+      quotas: [],
+    }))).catch(() => { errors.push("ChatGPT accounts unavailable"); return []; }) : Promise.resolve([]),
   ]);
-  return { accounts: [...claudeRows, ...codexRows], errors };
+  return { accounts: [...claudeRows, ...codexRows, ...chatgptRows], errors };
 }

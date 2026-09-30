@@ -5,11 +5,13 @@ import { NativeRelay } from "./relay.ts";
 
 export const MAX_PAYLOAD = 32 * 1024 * 1024;
 
-export function connectUpstream(url: string, headers: Record<string, string>, signal: AbortSignal) {
+export function connectUpstream(url: string, headers: Record<string, string>, signal: AbortSignal,
+  transform?: (frame: string | Buffer) => string | Buffer,
+  observe?: (frame: string | Buffer) => void) {
   return new Promise<{ socket: WebSocket; headers: Headers; relay: NativeRelay }>((resolve, reject) => {
     const socket = new WebSocket(url, { headers, handshakeTimeout: 20_000, followRedirects: false,
       perMessageDeflate: true, maxPayload: MAX_PAYLOAD });
-    const relay = new NativeRelay(socket);
+    const relay = new NativeRelay(socket, MAX_PAYLOAD, transform, observe);
     let responseHeaders = new Headers();
     let settled = false;
     const deadline = setTimeout(() => fail(new Error("Upstream handshake timed out")), 20_000);
