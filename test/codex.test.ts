@@ -62,7 +62,7 @@ test("two turns and compaction pass byte-for-byte on one account/connection, wit
 test("error/refusal/unknown event payloads including headers are not rewritten or retried", async () => {
   const f = await setup();
   const responses = [
-    JSON.stringify({ type: "error", status: 429, error: { code: "usage_limit_reached" }, headers: { "retry-after": "999" }, future: 42 }),
+    JSON.stringify({ type: "error", status: 429, error: { code: "rate_limit_exceeded" }, headers: { "retry-after": "999" }, future: 42 }),
     JSON.stringify({ type: "response.refusal.delta", delta: "No" }),
     JSON.stringify({ type: "response.failed", response: { error: { code: "rate_limit_exceeded" } } }),
     JSON.stringify({ type: "response.completed", response: { id: "resp_ok", output: [] } }),

@@ -5,6 +5,7 @@ import { AppError, messageSchema } from "./schema.ts";
 import { exhaustedQuota } from "./quota.ts";
 import type { UsageLimitMode } from "./quota.ts";
 import { Stats } from "./stats.ts";
+import { sessionId as extractSessionId, MISSING_SESSION } from "./session-id.ts";
 
 export function authorized(request: Pick<Request, "headers">, key?: string) {
   if (!key) return true;
@@ -49,11 +50,8 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
       try { raw = await request.json(); } catch { return errorResponse(400, "Invalid JSON"); }
       const input = messageSchema.safeParse(raw);
       if (!input.success) return errorResponse(400, "Invalid Messages request: model, max_tokens and messages are required");
-      const suppliedSession = request.headers.get("x-claude-code-session-id");
-      if (suppliedSession === null)
-        console.warn("Missing x-claude-code-session-id; created a new session. Reuse the response header to link subsequent requests.");
-      const sessionId = suppliedSession ?? crypto.randomUUID();
-      if (!z.uuid().safeParse(sessionId).success) return errorResponse(400, "Session ID must be a UUID");
+      const sessionId = extractSessionId(request.headers, raw);
+      if (!sessionId) { console.warn(`[claude] ${MISSING_SESSION}`); return errorResponse(400, MISSING_SESSION); }
       const rawUsageLimit = request.headers.get("anthropic-usage-limit");
       if (rawUsageLimit !== null && rawUsageLimit !== "extended" && rawUsageLimit !== "slow")
         return errorResponse(400, "anthropic-usage-limit must be extended or slow");
@@ -66,7 +64,7 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
       const excluded = new Set<string>();
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(600_000)]);
       const preferredId = await accounts.continuationAccount(sessionId, input.data);
-      const chooseOptions = { ...(usageLimit && { usageLimit }), ...(preferredId && { preferredId }) };
+      const chooseOptions = { sessionId, ...(usageLimit && { usageLimit }), ...(preferredId && { preferredId }) };
       let id = await accounts.choose(input.data.model, excluded, chooseOptions);
       for (;;) {
         excluded.add(id);

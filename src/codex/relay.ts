@@ -3,15 +3,22 @@ import type { ServerWebSocket } from "bun";
 
 const BUFFER_LIMIT = 32 * 1024 * 1024;
 type Frame = string | Buffer;
+export type RelayClient = Pick<ServerWebSocket<unknown>, "sendText" | "sendBinary" | "getBufferedAmount" | "terminate" | "close">;
+export interface SocketRelay {
+  attach(client: RelayClient): void;
+  send(frame: Frame): void;
+  close(code: number, reason: string): void;
+}
 
 // Bun's native ws compatibility layer has no pause/resume. Bound both send queues
 // and close explicitly on overflow, rather than pretending to exert backpressure.
 export class NativeRelay {
-  private client?: ServerWebSocket<NativeRelay>;
+  private client?: RelayClient;
   private pending: Frame[] = [];
   private pendingBytes = 0;
   private ended?: { code: number; reason: string };
   onClose = () => {};
+  preserveClientOnClose = false;
 
   constructor(readonly upstream: WebSocket, readonly limit = BUFFER_LIMIT,
     readonly transform?: (frame: Frame) => Frame, readonly observe?: (frame: Frame) => void) {
@@ -21,16 +28,18 @@ export class NativeRelay {
     });
     upstream.on("close", (code, reason) => {
       this.ended = { code, reason: reason.toString() };
-      if (code === 1006) this.client?.terminate();
-      else this.client?.close(code === 1005 ? undefined : code, reason.toString());
+      if (!this.preserveClientOnClose) {
+        if (code === 1006) this.client?.terminate();
+        else this.client?.close(code === 1005 ? undefined : code, reason.toString());
+      }
       this.pending = [];
       this.pendingBytes = 0;
       this.onClose();
     });
-    upstream.on("error", () => this.client?.terminate());
+    upstream.on("error", () => { if (!this.preserveClientOnClose) this.client?.terminate(); });
   }
 
-  attach(client: ServerWebSocket<NativeRelay>) {
+  attach(client: RelayClient) {
     this.client = client;
     if (this.ended) { client.close(1011, "Upstream closed before local upgrade"); return; }
     const frames = this.pending;
@@ -38,6 +47,8 @@ export class NativeRelay {
     this.pendingBytes = 0;
     for (const frame of frames) this.receive(frame);
   }
+
+  detach() { this.client = undefined; }
 
   private receive(frame: Frame) {
     if (this.ended) return;

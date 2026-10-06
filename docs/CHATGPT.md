@@ -19,13 +19,13 @@ Each account keeps its issued `oaiapp_...` client ID, verified identity, rotatin
 
 ## Requests
 
-Use `GET /chatgpt/v1/models` for available model slugs. HTTP requests go to `POST /chatgpt/v1/responses` with the proxy API key:
+`GET /chatgpt/v1/models` provides model suggestions, not an allowlist: the catalog can omit working models. Model access is checked upstream during inference. HTTP requests go to `POST /chatgpt/v1/responses` with the proxy API key and `session-id: <conversation-id>` (or another [supported ID](SESSIONS.md)). Missing HTTP IDs are rejected. HTTP account affinity is persisted per provider/session/model:
 
 ```json
 {"model":"<available-model>","input":[{"role":"user","content":"Hello"}],"stream":true}
 ```
 
-The proxy sets `store: false` and `stream: true`. Send the complete history in `input` on every HTTP turn; `previous_response_id` is rejected. It forwards upstream status, error body (`error.code` and `error.param`), and SSE events without rewriting them. On a 401 it refreshes the token once, then forwards a remaining 401. A confirmed `subscription_sharing_usage_limit_exceeded` temporarily removes that account from random selection; other 429 responses pass through without changing account selection.
+The proxy sets `store: false` and `stream: true`. Send complete history in `input` on every HTTP turn. `previous_response_id` is passed unchanged, but cannot trigger transparent replay and may be rejected upstream. Upstream status, error body (`error.code` and `error.param`), and SSE events are preserved. A 401 refreshes the token once. Confirmed `subscription_sharing_usage_limit_exceeded` temporarily excludes the account and retries full input on another account only before response bytes are sent, once per account. Other errors and late quota failures pass through.
 
 The client must distinguish `response.completed` from `response.failed`, `response.incomplete`, and an interrupted stream. For [structured sharing errors](https://developers.openai.com/siwc/token-sharing-open-source/errors-and-recovery#structured-responses-errors):
 
@@ -39,6 +39,6 @@ The client must distinguish `response.completed` from `response.failed`, `respon
 | `subscription_sharing_invalid_user` | Diagnose the credential context; reauthorize only after confirmed revocation or terminal refresh failure. |
 | `chatpass_v2_scope_not_authorized`, `chatpass_v2_invalid_authorization_context` | Check the OAuth client and grant. |
 
-`WS /chatgpt/v1/responses` selects one account for the connection and forwards Responses WebSocket events. Send `response.create` frames with an `input` array and `model`; the proxy sets `store: false`. WebSocket continuation can use `previous_response_id` only for responses created on that connection. See the [WebSocket protocol](https://developers.openai.com/api/docs/guides/websocket-mode).
+`WS /chatgpt/v1/responses` opens upstream during the handshake, allowing warmup. Logical session IDs are optional; models and `stream_id` can change without changing the account. The proxy sets `store: false`. Only confirmed sharing-quota exhaustion allows upstream replacement inside the same client socket. A sole unstarted create with full input and no previous ID can retry transparently; partial or concurrent generations are never replayed. IDs and upstream errors are not rewritten. See [Sessions](SESSIONS.md) and the [WebSocket protocol](https://developers.openai.com/api/docs/guides/websocket-mode).
 
 The [preview limitations](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations) apply. In particular, do not send unsupported Responses fields or hosted tools. OpenAI does not document a numeric subscription-sharing usage API; `GET /chatgpt/usage` points to ChatGPT Settings → Usage instead.

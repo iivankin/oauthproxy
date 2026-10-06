@@ -30,6 +30,7 @@ export async function fixture(config: { key?: string | null } = {}) {
   const events = new EventEmitter();
   const options = {
     rejectStatus: 0, rejectBody: "", rejectToken: "", refreshError: false, pollPending: false,
+    models: ["test-model"],
     onFrame: (socket: ServerWebSocket<undefined>, frame: string) => { socket.send(frame); },
     onResponses: (_request: Request): Response | Promise<Response> => new Response("event: response.completed\ndata: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_test\"}}\n\n",
       { headers: { "content-type": "text/event-stream", "x-request-id": "req_sse" } }),
@@ -47,7 +48,7 @@ export async function fixture(config: { key?: string | null } = {}) {
       calls.push({ path, headers: Object.fromEntries(req.headers), body: await req.text() });
       if (path === "/responses") return options.onResponses(req);
       if (path === "/usage") return Response.json(usage.get(req.headers.get("authorization") ?? "") ?? { rate_limit: { allowed: true, limit_reached: false } });
-      if (path === "/models") return Response.json({ models: [{ slug: "test-model", display_name: "Test", future: { preserved: true } }] });
+      if (path === "/models") return Response.json({ models: options.models.map(slug => ({ slug, display_name: "Test", future: { preserved: true } })) });
       if (path === "/oauth/token") {
         if (options.refreshError) return Response.json({ error: "invalid_grant" }, { status: 400 });
         return Response.json({ ...tokens("a"), access_token: "a-refreshed", refresh_token: "a-refresh-rotated" });

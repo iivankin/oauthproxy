@@ -4,8 +4,10 @@ import { Transport, UpstreamError, jsonResponse } from "./transport.ts";
 import { AppError, modelsPageSchema, profileSchema, usageSchema, safeAccount, type Tokens, type Usage, type Model, type Account, type Message, type Profile } from "./schema.ts";
 import { hasQuota, retryAt, type UsageLimitMode } from "./quota.ts";
 import { previousHistoryHash } from "./history.ts";
+import { dirname, join } from "node:path";
+import { SessionBindings } from "./session-bindings.ts";
 
-type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string };
+type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
 type MessageHints = { usageLimit?: UsageLimitMode; gatewayPromptId?: string };
 
 export class Accounts {
@@ -15,7 +17,10 @@ export class Accounts {
   private cooldown = new Map<string, number>();
   private modelCooldown = new Map<string, Map<string, number>>();
 
-  constructor(readonly store = new AccountStore(), readonly transport = new Transport()) {}
+  readonly bindings: SessionBindings;
+  constructor(readonly store = new AccountStore(), readonly transport = new Transport()) {
+    this.bindings = new SessionBindings(join(dirname(store.path), ".session-bindings"), "claude");
+  }
 
   async add(tokens: Tokens, name?: string) {
     const profile = profileSchema.parse(await jsonResponse(await this.transport.request(tokens, "/api/oauth/profile")));
@@ -139,19 +144,29 @@ export class Accounts {
   }
 
   async choose(model: string, excluded = new Set<string>(), options: ChooseOptions = {}) {
+    if (options.sessionId) return this.bindings.select(options.sessionId, model, preferredId =>
+      this.pick(model, excluded, { ...options, preferredId: preferredId ?? options.preferredId }));
+    return this.pick(model, excluded, options);
+  }
+
+  private async pick(model: string, excluded: Set<string>, options: ChooseOptions) {
     const accounts = (await this.store.read()).accounts.filter(account => !account.disabled && !excluded.has(account.id));
     if (!accounts.length) throw new AppError(503, "No available accounts; run accounts add");
     let failed = false;
+    let preferredFailed = false;
     const candidates = await Promise.all(accounts.map(async account => {
       if ((this.cooldown.get(account.id) ?? 0) > Date.now()) return null;
       if ((this.modelCooldown.get(account.id)?.get(model) ?? 0) > Date.now()) return null;
       try {
         const usage = await this.usage(account.id);
+        if (account.id === options.preferredId && [usage.five_hour, usage.seven_day].some(window =>
+          !window || typeof window.utilization !== "number")) throw new AppError(503, "Bound account quota is unknown");
         if (!hasQuota(usage, model, options.usageLimit)) return null;
         const models = await this.models(account.id);
         return models.some(item => item.id === model) ? account.id : null;
-      } catch { failed = true; return null; }
+      } catch { failed = true; preferredFailed ||= account.id === options.preferredId; return null; }
     }));
+    if (preferredFailed) throw new AppError(503, "Cannot verify the bound account quota or models");
     const eligible = candidates.filter(id => id !== null);
     if (!eligible.length) throw new AppError(failed ? 503 : 429,
       failed ? "Cannot verify account quota or models" : "No account has quota for this model (or model unavailable)");

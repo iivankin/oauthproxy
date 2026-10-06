@@ -27,7 +27,7 @@ const help = `Usage: bun src/cli.ts <command>
   serve [--host 127.0.0.1] [--port 3000]          Combined HTTP + WebSocket server
 
 Credentials: ./accounts.json (Claude), ./codex-accounts.json (Codex), ./chatgpt-accounts.json (ChatGPT).
-Claude history CAS: ./.claude-proxy-cas. All paths relative to cwd.
+Claude history CAS: ./.claude-proxy-cas. HTTP account bindings: ./.session-bindings. All paths relative to cwd.
 Optional env: PROXY_API_KEY.
 `;
 

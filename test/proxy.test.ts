@@ -12,7 +12,7 @@ import { accountSchema, tokensSchema, usageSchema, type Message } from "../src/s
 import { exhaustedQuota, hasQuota } from "../src/quota.ts";
 import { createLogin, validateCode } from "../src/oauth.ts";
 import { createHash } from "node:crypto";
-import { fingerprint, IDENTITY } from "../src/profile.ts";
+import { fingerprint } from "../src/profile.ts";
 
 const directories: string[] = [];
 afterEach(async () => { for (const path of directories.splice(0)) await rm(path, { recursive: true, force: true }); });
@@ -90,7 +90,6 @@ describe("account routing and quota", () => {
     expect(forwarded?.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Hello", cache_control: { type: "ephemeral", ttl: "1h" } }] }]);
     expect(forwarded?.betas).toBeUndefined();
     expect(forwarded?.system).toEqual([expect.objectContaining({ text: expect.stringContaining("cc_entrypoint=sdk-ts;") }),
-      { type: "text", text: IDENTITY, cache_control: { type: "ephemeral", ttl: "1h" } },
       { type: "text", text: "Custom instructions", cache_control: { type: "ephemeral", ttl: "1h" } }]);
     expect(headers?.get("x-stainless-package-version")).toBe("0.112.1");
     expect(headers?.get("user-agent")).toContain("sdk-ts, agent-sdk/0.3.285");
@@ -459,19 +458,45 @@ test("SSE forwards the first chunk without buffering and propagates abort", asyn
   await reader.cancel();
 });
 
-test("missing session header warns, returns a new UUID and does not warn when it is reused", async () => {
+test("Claude affinity persists without an assistant-history lookup, across equivalent ID fields and restart", async () => {
+  const calls: string[] = [];
+  const accounts = await setup(async (url, init) => {
+    const control = controlPlane(url, init);
+    if (control) return control;
+    calls.push(new Headers(init?.headers).get("authorization")!);
+    // Without a request ID this response cannot establish a history CAS record.
+    return Response.json({ id: "msg_test", content: [] });
+  });
+  const send = async (manager: Accounts, bodyId = false) => {
+    const request = makeRequest({ ...input, ...(bodyId && { prompt_cache_key: "sticky" }) });
+    request.headers.delete("x-claude-code-session-id");
+    if (!bodyId) request.headers.set("x-session-affinity", "sticky");
+    const response = await handler(manager)(request);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-claude-code-session-id")).toBe("sticky");
+  };
+  await send(accounts);
+  await send(accounts, true);
+  await send(new Accounts(accounts.store, accounts.transport));
+  expect(new Set(calls).size).toBe(1);
+});
+
+test("missing session ID warns and rejects before upstream; body IDs and non-UUID header IDs are accepted", async () => {
   const accounts = await setup(async (url, init) => controlPlane(url, init) ?? Response.json({ id: "msg_test", content: [] }), ["a"]);
   const warn = spyOn(console, "warn").mockImplementation(() => {});
   try {
     const request = makeRequest();
     request.headers.delete("x-claude-code-session-id");
     const response = await handler(accounts)(request);
-    expect(response.status).toBe(200);
-    const session = response.headers.get("x-claude-code-session-id")!;
-    expect(session).toMatch(/^[0-9a-f-]{36}$/);
+    expect(response.status).toBe(400);
     expect(warn).toHaveBeenCalledTimes(1);
-    expect(warn.mock.calls[0]?.[0]).toContain("Missing x-claude-code-session-id");
-    await handler(accounts)(makeRequest(input, { "x-claude-code-session-id": session }));
+    expect(warn.mock.calls[0]?.[0]).toContain("session ID is required");
+    const bodyRequest = makeRequest({ ...input, metadata: { user_id: '{"session_id":"body-session"}' } });
+    bodyRequest.headers.delete("x-claude-code-session-id");
+    const accepted = await handler(accounts)(bodyRequest);
+    expect(accepted.status).toBe(200);
+    expect(accepted.headers.get("x-claude-code-session-id")).toBe("body-session");
+    expect((await handler(accounts)(makeRequest(input, { "x-claude-code-session-id": "body-session" }))).status).toBe(200);
     expect(warn).toHaveBeenCalledTimes(1);
   } finally { warn.mockRestore(); }
 });

@@ -3,7 +3,6 @@ import WebSocket from "ws";
 const model = Bun.argv[2];
 if (!model) throw new Error("Usage: bun examples/codex-two-turns.ts <model-slug>");
 const url = new URL(process.env.PROXY_URL ?? "ws://127.0.0.1:3000/v1/responses");
-url.searchParams.set("model", model);
 const ws = new WebSocket(url.toString(), { headers: {
   "session-id": crypto.randomUUID(),
   ...(process.env.PROXY_API_KEY && { authorization: `Bearer ${process.env.PROXY_API_KEY}` }),

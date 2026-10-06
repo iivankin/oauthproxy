@@ -3,6 +3,8 @@ import { AccountStore } from "./store.ts";
 import { Transport, UpstreamError } from "./transport.ts";
 import { catalogSchema, type Account, type Catalog, type Tokens } from "./types.ts";
 import type { Identity } from "./oauth.ts";
+import { dirname, join } from "node:path";
+import { SessionBindings } from "../session-bindings.ts";
 
 export class SelectionError extends Error {}
 const permanentRefreshCodes = new Set(["invalid_grant", "invalid_refresh_token", "token_expired",
@@ -19,7 +21,10 @@ function permanentRefreshFailure(error: unknown) {
 export class Accounts {
   private readonly modelCache = new Map<string, { at: number; value: Catalog }>();
   private readonly limitedUntil = new Map<string, number>();
-  constructor(readonly store: AccountStore, readonly transport: Transport) {}
+  readonly bindings: SessionBindings;
+  constructor(readonly store: AccountStore, readonly transport: Transport) {
+    this.bindings = new SessionBindings(join(dirname(store.path), ".session-bindings"), "chatgpt");
+  }
 
   async add(tokens: Tokens, identity: Identity, clientId: string, name?: string) {
     if (!tokens.id_token || !tokens.scope?.split(" ").includes("chatgpt.tokens.use.direct"))
@@ -87,20 +92,18 @@ export class Accounts {
     return value;
   }
 
-  async choose(model?: string) {
-    const accounts = (await this.store.read()).accounts.filter(account =>
-      !account.disabled && (this.limitedUntil.get(account.id) ?? 0) <= Date.now());
-    const candidates = await Promise.all(accounts.map(async account => {
-      try {
-        if (model && !(await this.models(account.id)).models.some(item => item.slug === model)) return undefined;
-        return account.id;
-      } catch {
-        console.warn(`[chatgpt] Cannot verify models for ${account.id}; skipping`);
-        return undefined;
-      }
-    }));
-    const eligible = candidates.filter((id): id is string => id !== undefined);
-    if (!eligible.length) throw new SelectionError("No ChatGPT account with an available model; check account access and limits");
+  async choose(model?: string, sessionId?: string, excluded: ReadonlySet<string> = new Set()) {
+    if (sessionId && model) return this.bindings.select(sessionId, model, preferredId => this.pick(preferredId, excluded));
+    return this.pick(undefined, excluded);
+  }
+
+  private async pick(preferredId?: string, excluded: ReadonlySet<string> = new Set()) {
+    // The catalog can omit working models; inference errors determine model access.
+    const eligible = (await this.store.read()).accounts.filter(account =>
+      !account.disabled && !excluded.has(account.id) && (this.limitedUntil.get(account.id) ?? 0) <= Date.now())
+      .map(account => account.id);
+    if (!eligible.length) throw new SelectionError("No ChatGPT account available; check account access and limits");
+    if (preferredId && eligible.includes(preferredId)) return preferredId;
     return eligible[randomInt(eligible.length)]!;
   }
 

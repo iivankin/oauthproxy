@@ -3,9 +3,13 @@ import { z } from "zod";
 import { Accounts, SelectionError } from "./accounts.ts";
 import { UpstreamError } from "./transport.ts";
 import { responseHeaders } from "../codex/headers.ts";
-import { NativeRelay } from "../codex/relay.ts";
+import type { SocketRelay } from "../codex/relay.ts";
 import { connectUpstream } from "../codex/websocket.ts";
 import { Stats } from "../stats.ts";
+import { sessionId as extractSessionId, MISSING_SESSION } from "../session-id.ts";
+import { AccountSocket } from "../account-socket.ts";
+import { responseError } from "../responses-events.ts";
+import { quotaFailover } from "../quota-failover.ts";
 
 const requestSchema = z.object({ model: z.string().min(1), input: z.array(z.unknown()),
   stream: z.literal(true).optional() }).passthrough();
@@ -25,61 +29,31 @@ export function upstreamError(cause: unknown) {
     cause instanceof SelectionError ? cause.message : "ChatGPT account or upstream operation failed");
 }
 
-function observeFailures(body: ReadableStream<Uint8Array>, onLimit: () => void) {
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let pending = "";
-  return new ReadableStream<Uint8Array>({
-    async pull(controller) {
-      try {
-        const chunk = await reader.read();
-        if (chunk.done) { controller.close(); return; }
-        pending += decoder.decode(chunk.value, { stream: true });
-        // Inspect only completed SSE events; never change the bytes sent to the client.
-        const frames = pending.split(/\r?\n\r?\n/);
-        pending = frames.pop() ?? "";
-        for (const frame of frames) {
-          const data = frame.split(/\r?\n/).filter(line => line.startsWith("data:")).map(line => line.slice(5).trimStart()).join("\n");
-          if (!data) continue;
-          try {
-            const event = JSON.parse(data);
-            if (event.type === "response.failed" && event.response?.error?.code === limitCode) onLimit();
-          } catch { /* Unknown SSE data remains untouched. */ }
-        }
-        if (pending.length > 256_000) pending = "";
-        controller.enqueue(chunk.value);
-      } catch (cause) { controller.error(cause); }
-    },
-    cancel(reason) { return reader.cancel(reason); },
-  }, { highWaterMark: 0 });
-}
-
 export async function streamResponses(accounts: Accounts, request: Request, stats = new Stats()) {
   if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
     return error(415, "Content-Type must be application/json");
   let input: unknown;
   try { input = await request.json(); } catch { return error(400, "Invalid JSON"); }
   const parsed = requestSchema.safeParse(input);
-  if (!parsed.success || "previous_response_id" in parsed.data)
-    return error(400, "Supply model and full input array; HTTP continuation cannot use previous_response_id");
+  if (!parsed.success) return error(400, "Supply model and input array");
+  const sessionId = extractSessionId(request.headers, input);
+  if (!sessionId) { console.warn(`[chatgpt] ${MISSING_SESSION}`); return error(400, MISSING_SESSION); }
   const body = JSON.stringify({ ...parsed.data, store: false, stream: true });
-  const id = await accounts.choose(parsed.data.model);
   const signal = AbortSignal.any([request.signal, AbortSignal.timeout(600_000)]);
-  const upstream = await stats.http("ChatGPT", id, signal, () => accounts.authorized(id,
-    account => accounts.transport.responses(account, body, signal)));
-  if (upstream.status === 429) {
-    try {
-      const payload = await upstream.clone().json();
-      if (payload?.error?.code === limitCode) accounts.limit(id, upstream.headers.get("retry-after"));
-    } catch { /* Non-JSON 429 is passed through without changing account selection. */ }
-  }
+  const upstream = await quotaFailover({
+    retry: !parsed.data.previous_response_id,
+    choose: excluded => accounts.choose(parsed.data.model, sessionId, excluded),
+    execute: id => stats.http("ChatGPT", id, signal, () => accounts.authorized(id,
+      account => accounts.transport.responses(account, body, signal))),
+    quota: event => responseError(event)?.code === limitCode,
+    limit: (id, headers) => accounts.limit(id, headers.get("retry-after")),
+  });
   const headers = responseHeaders(upstream.headers);
   headers.delete("content-encoding");
   headers.set("cache-control", "no-store");
+  headers.set("session-id", sessionId);
   if (upstream.headers.get("content-type")?.startsWith("text/event-stream")) headers.set("x-accel-buffering", "no");
-  return new Response(upstream.body && upstream.headers.get("content-type")?.startsWith("text/event-stream")
-    ? observeFailures(upstream.body, () => accounts.limit(id)) : upstream.body,
-  { status: upstream.status, headers });
+  return new Response(upstream.body, { status: upstream.status, headers });
 }
 
 function wsRequest(frame: string | Buffer) {
@@ -93,33 +67,39 @@ function wsRequest(frame: string | Buffer) {
   return JSON.stringify(event);
 }
 
-export async function upgrade(accounts: Accounts, request: Request, server: Server<NativeRelay>, stats = new Stats()) {
+export async function upgrade(accounts: Accounts, request: Request, server: Server<SocketRelay>, stats = new Stats()) {
   if (request.method !== "GET" || request.headers.get("upgrade")?.toLowerCase() !== "websocket")
     return error(426, "Use WebSocket upgrade or POST with stream: true");
   if (request.headers.get("sec-websocket-version") !== "13" ||
     !/^[+/0-9A-Za-z]{22}==$/.test(request.headers.get("sec-websocket-key") ?? "") ||
     request.headers.has("sec-websocket-protocol")) return error(400, "Invalid WebSocket upgrade");
+  let relay: AccountSocket | undefined;
+  const connect = async (id: string, signal: AbortSignal) => {
+    const done = stats.start("ChatGPT", id, "WS");
+    try {
+      const upstream = await accounts.authorized(id, account => connectUpstream(accounts.transport.urls.websocket,
+        { authorization: `Bearer ${account.accessToken}` }, signal, wsRequest, frame => {
+          if (typeof frame !== "string") return;
+          try {
+            if (responseError(JSON.parse(frame))?.code === limitCode) { accounts.limit(id); relay?.limited(id); }
+          }
+          catch { /* Unknown WebSocket events pass through. */ }
+        }));
+      upstream.socket.once("close", code => done([1000, 1001, 1005].includes(code) ? "completed" : "errors"));
+      if (upstream.socket.readyState === upstream.socket.CLOSED) done("errors");
+      return upstream;
+    } catch (cause) { done(signal.aborted ? "cancelled" : "errors"); throw cause; }
+  };
   const id = await accounts.choose();
   request.signal.throwIfAborted();
-  const done = stats.start("ChatGPT", id, "WS");
-  let upstream: Awaited<ReturnType<typeof connectUpstream>>;
-  try {
-    upstream = await accounts.authorized(id, account => connectUpstream(accounts.transport.urls.websocket,
-      { authorization: `Bearer ${account.accessToken}` }, request.signal, wsRequest, frame => {
-        if (typeof frame !== "string") return;
-        try {
-          const event = JSON.parse(frame);
-          if (event.type === "response.failed" && event.response?.error?.code === limitCode) accounts.limit(id);
-        } catch { /* Unknown WebSocket events pass through. */ }
-      }));
-  } catch (cause) { done(request.signal.aborted ? "cancelled" : "errors"); throw cause; }
-  upstream.socket.once("close", code => done([1000, 1001, 1005].includes(code) ? "completed" : "errors"));
-  if (upstream.socket.readyState === upstream.socket.CLOSED) done("errors");
-  if (request.signal.aborted) { done("cancelled"); upstream.socket.terminate(); return error(499, "Client disconnected"); }
+  const upstream = await connect(id, request.signal);
+  relay = new AccountSocket(id, upstream, { choose: (model, excluded) => accounts.choose(model, undefined, excluded),
+    connect, error: upstreamError, quota: event => responseError(event)?.code === limitCode });
+  if (request.signal.aborted) { relay.close(1001, "Client disconnected"); return error(499, "Client disconnected"); }
   const headers = responseHeaders(upstream.headers, true);
-  if (server.upgrade(request, { data: upstream.relay, headers })) return undefined;
-  done("errors");
-  upstream.socket.terminate();
+  headers.set("session-id", extractSessionId(request.headers) ?? crypto.randomUUID());
+  if (server.upgrade(request, { data: relay, headers })) return undefined;
+  relay.close(1008, "WebSocket upgrade rejected");
   return error(400, "WebSocket upgrade rejected");
 }
 

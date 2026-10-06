@@ -17,10 +17,9 @@ export function applyCaching(body: Prepared): Prepared {
   // insert a 1h breakpoint after a caller's 5m one (invalid TTL ordering).
   if (explicit) return body;
   const system = body.system.map(block => ({ ...block }));
-  // Billing is block zero. The captured SDK profile marks identity and custom
-  // system separately; tools are already part of the cached prefix.
-  if (system[1]) system[1].cache_control = { ...marker };
-  if (system.length > 2) system.at(-1)!.cache_control = { ...marker };
+  // Billing is block zero and remains uncached. Cache only the caller's system
+  // tail; tools are already part of the cached prefix.
+  if (system.length > 1) system.at(-1)!.cache_control = { ...marker };
   const messages = [...body.messages];
   const last = messages.at(-1);
   if (!last) return { ...body, system, messages };

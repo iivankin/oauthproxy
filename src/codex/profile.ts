@@ -1,7 +1,8 @@
 import { arch, release, type } from "node:os";
 import type { Account } from "./schema.ts";
 
-export const CODEX_VERSION = "0.156.1";
+// Advertise a high version to expose version-gated models without tracking every CLI release.
+export const CODEX_VERSION = "0.999.0";
 export const CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann";
 export const ENDPOINTS = {
   issuer: "https://auth.openai.com",

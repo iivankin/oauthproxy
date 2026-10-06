@@ -3,6 +3,7 @@ import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
+import { once } from "node:events";
 import WebSocket from "ws";
 import { Accounts as ClaudeAccounts } from "../src/accounts.ts";
 import { AccountStore as ClaudeStore } from "../src/store.ts";
@@ -32,6 +33,8 @@ async function setup() {
   let base = "";
   let status = 200;
   let responseBody = 'event: response.completed\ndata: {"type":"response.completed"}\n\n';
+  let wsReply = (frame: string) => frame;
+  let onResponse: ((request: Request) => Response) | undefined;
   const upstream = Bun.serve({ hostname: "127.0.0.1", port: 0, async fetch(request, server) {
     const path = new URL(request.url).pathname;
     if (path === "/responses" && request.headers.get("upgrade") === "websocket") {
@@ -52,11 +55,11 @@ async function setup() {
         refresh_token: "refresh-2", id_token: idToken, scope: "openid offline_access chatgpt.tokens.use.direct",
         expires_in: 3600 });
     }
-    if (path === "/responses") return new Response(responseBody, { status,
+    if (path === "/responses") return onResponse?.(request) ?? new Response(responseBody, { status,
       headers: { "content-type": status === 200 ? "text/event-stream" : "application/json", "x-request-id": "req_test" } });
     return new Response("Not found", { status: 404 });
   }, websocket: {
-    message(client, message) { frames.push(message.toString()); client.send(message.toString()); },
+    message(client, message) { frames.push(message.toString()); client.send(wsReply(message.toString())); },
   } });
   base = upstream.url.origin;
   const urls: Endpoints = { issuer: base, authorize: `${base}/authorize`, token: `${base}/token`,
@@ -68,7 +71,9 @@ async function setup() {
   cleanups.push(async () => { await upstream.stop(true); await rm(directory, { recursive: true, force: true }); });
   return { store, transport, accounts, requests, frames, handshakes, directory,
     setNonce(value: string) { nonce = value; }, setClientId(value: string) { clientId = value; },
-    setResponse(next: number, body: string) { status = next; responseBody = body; } };
+    setResponse(next: number, body: string) { status = next; responseBody = body; },
+    setOnResponse(reply: (request: Request) => Response) { onResponse = reply; },
+    setWsReply(reply: (frame: string) => string) { wsReply = reply; } };
 }
 
 async function signedIn() {
@@ -112,22 +117,24 @@ test("dynamic OAuth verifies state, nonce, audience and signature before saving 
 test("public Responses SSE forces stateless streaming, forwards errors, and cools only confirmed quota limits", async () => {
   const f = await signedIn();
   const request = (body: unknown) => new Request("http://localhost/chatgpt/v1/responses", {
-    method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body),
+    method: "POST", headers: { "content-type": "application/json", "session-id": "sharing-session" }, body: JSON.stringify(body),
   });
-  const payload = { model: "shared-model", input: [{ role: "user", content: "Hello" }], store: true };
+  const payload = { model: "gpt-6.1-sol", input: [{ role: "user", content: "Hello" }], store: true };
   const response = await streamResponses(f.accounts, request(payload));
   expect(response.status).toBe(200);
   expect(await response.text()).toContain("response.completed");
   const sent = JSON.parse(f.requests.find(item => item.path === "/responses")!.body);
-  expect(sent).toMatchObject({ store: false, stream: true, input: payload.input });
+  expect(sent).toMatchObject({ model: payload.model, store: false, stream: true, input: payload.input });
+  expect(f.requests.filter(item => item.path === "/models")).toHaveLength(0);
   expect(f.requests.find(item => item.path === "/responses")!.authorization).toBe("Bearer initial");
-  expect((await streamResponses(f.accounts, request({ ...payload, previous_response_id: "resp_old" }))).status).toBe(400);
+  await (await streamResponses(f.accounts, request({ ...payload, previous_response_id: "resp_old" }))).text();
+  expect(JSON.parse(f.requests.filter(item => item.path === "/responses").at(-1)!.body).previous_response_id).toBe("resp_old");
   f.setResponse(429, JSON.stringify({ error: { code: "other_rate_limit" } }));
   expect((await streamResponses(f.accounts, request(payload))).status).toBe(429);
-  expect(await f.accounts.choose("shared-model")).toBe(f.account.id);
+  expect(await f.accounts.choose(payload.model)).toBe(f.account.id);
   f.setResponse(429, JSON.stringify({ error: { code: "subscription_sharing_usage_limit_exceeded" } }));
   expect((await streamResponses(f.accounts, request(payload))).status).toBe(429);
-  await expect(f.accounts.choose("shared-model")).rejects.toBeInstanceOf(SelectionError);
+  await expect(f.accounts.choose(payload.model)).rejects.toBeInstanceOf(SelectionError);
 });
 
 test("combined server exposes separate ChatGPT routes and pins a WebSocket to one OAuth account", async () => {
@@ -146,18 +153,18 @@ test("combined server exposes separate ChatGPT routes and pins a WebSocket to on
     param: "tools", message: "Unsupported tool" } });
   f.setResponse(400, errorBody);
   const rejected = await fetch(`${base}chatgpt/v1/responses`, { method: "POST",
-    headers: { authorization: "Bearer local-key", "content-type": "application/json" },
+    headers: { authorization: "Bearer local-key", "content-type": "application/json", "session-id": "sharing-session" },
     body: JSON.stringify({ model: "shared-model", input: [] }) });
   expect(rejected.status).toBe(400);
   expect(await rejected.text()).toBe(errorBody);
   f.setResponse(200, 'event: response.failed\ndata: {"type":"response.failed","response":{"error":{"code":"subscription_sharing_user_unavailable"}}}\n\n');
   const streamed = await fetch(`${base}chatgpt/v1/responses`, { method: "POST",
-    headers: { authorization: "Bearer local-key", "content-type": "application/json" },
+    headers: { authorization: "Bearer local-key", "content-type": "application/json", "session-id": "sharing-session" },
     body: JSON.stringify({ model: "shared-model", input: [] }) });
   expect(streamed.status).toBe(200);
   expect(await streamed.text()).toContain("subscription_sharing_user_unavailable");
   const socket = new WebSocket(`${base.replace("http", "ws")}chatgpt/v1/responses`, {
-    headers: { authorization: "Bearer local-key" },
+    headers: { authorization: "Bearer local-key", "session-id": "sharing-session" },
   });
   await new Promise<void>((resolve, reject) => { socket.once("open", resolve); socket.once("error", reject); });
   const reply = new Promise<string>((resolve, reject) => {
@@ -189,4 +196,73 @@ test("admin start and callback completion save credentials without returning sec
     expect(text).not.toContain(secret);
   expect((await post("/admin/chatgpt/oauth/complete", { flowId: start.flowId, callbackUrl })).status).toBe(404);
   expect((await f.accounts.status())).toHaveLength(1);
+});
+
+test("sharing SSE stays on its durable binding, passes ordinary errors, then rebinds only after confirmed quota", async () => {
+  const f = await signedIn();
+  await f.accounts.add({ access_token: "second", refresh_token: "second-refresh", expires_in: 3600,
+    id_token: "verified-id", scope: "openid offline_access chatgpt.tokens.use.direct" },
+  { subject: "subject-2", email: "second@example.test" }, "oaiapp_second");
+  const request = () => new Request("http://localhost/chatgpt/v1/responses", { method: "POST",
+    headers: { "content-type": "application/json", "x-session-affinity": "shared-chat" },
+    body: JSON.stringify({ model: "shared-model", input: [], stream: true }) });
+  for (let i = 0; i < 4; i++) await (await streamResponses(f.accounts, request())).text();
+  const calls = () => f.requests.filter(item => item.path === "/responses");
+  const authorization = calls()[0]!.authorization;
+  expect(new Set(calls().map(call => call.authorization)).size).toBe(1);
+  const selected = (await f.store.read()).accounts.find(a => `Bearer ${a.accessToken}` === authorization)!.id;
+  expect(await new Accounts(f.store, f.transport).choose("shared-model", "shared-chat")).toBe(selected);
+  f.setResponse(429, '{"error":{"code":"rate_limit_exceeded"}}');
+  expect((await streamResponses(f.accounts, request())).status).toBe(429);
+  expect(await f.accounts.choose("shared-model", "shared-chat")).toBe(selected);
+  const quota = 'event: response.failed\ndata: {"type":"response.failed","response":{"error":{"code":"subscription_sharing_usage_limit_exceeded"}}}\n\n';
+  const completed = 'event: response.completed\ndata: {"type":"response.completed"}\n\n';
+  f.setOnResponse(request => new Response(request.headers.get("authorization") === authorization ? quota : completed,
+    { headers: { "content-type": "text/event-stream" } }));
+  const before = calls().length;
+  expect(await (await streamResponses(f.accounts, request())).text()).toBe(completed);
+  expect(calls()).toHaveLength(before + 2);
+  expect(calls().at(-1)!.authorization).not.toBe(authorization);
+  const missing = new Request(request());
+  missing.headers.delete("x-session-affinity");
+  const count = calls().length;
+  expect((await streamResponses(f.accounts, missing)).status).toBe(400);
+  expect(calls()).toHaveLength(count);
+});
+
+test("sharing WS warms up without a logical ID and transparently retries only an unstarted full create", async () => {
+  const f = await signedIn();
+  const proxy = serve(new ClaudeAccounts(new ClaudeStore(join(f.directory, "claude.json"))), "127.0.0.1", 0, "local-key",
+    new CodexAccounts(new CodexStore(join(f.directory, "codex.json")), new CodexTransport()), f.accounts);
+  cleanups.push(async () => { await proxy.stop(); });
+  const socket = new WebSocket(`${proxy.url.toString().replace("http", "ws")}chatgpt/v1/responses`, {
+    headers: { authorization: "Bearer local-key" },
+  });
+  await once(socket, "open");
+  expect(f.handshakes).toEqual(["Bearer initial"]);
+  expect(f.frames).toHaveLength(0);
+  await f.accounts.add({ access_token: "second", refresh_token: "second-refresh", expires_in: 3600,
+    id_token: "verified-id", scope: "openid offline_access chatgpt.tokens.use.direct" },
+  { subject: "subject-2", email: "second@example.test" }, "oaiapp_second");
+  const quota = JSON.stringify({ type: "response.failed", stream_id: "s1",
+    response: { error: { code: "subscription_sharing_usage_limit_exceeded" } } });
+  f.setWsReply(frame => f.frames.length === 1 ? quota : frame);
+  const first = once(socket, "message");
+  socket.send('{"type":"response.create","model":"shared-model","stream_id":"s1","input":[]}');
+  expect(JSON.parse((await first)[0].toString()).stream_id).toBe("s1");
+  expect(f.handshakes).toEqual(["Bearer initial", "Bearer second"]);
+  expect(f.frames).toHaveLength(2);
+  expect(f.frames[0]).toBe(f.frames[1]);
+  const delta = once(socket, "message");
+  socket.send('{"type":"response.create","model":"shared-model","stream_id":"s1","previous_response_id":"old","input":[]}');
+  const rejected = JSON.parse((await delta)[0].toString());
+  expect(rejected.previous_response_id).toBe("old");
+  expect(rejected.stream_id).toBe("s1");
+  expect(f.handshakes).toHaveLength(2);
+  const full = once(socket, "message");
+  socket.send('{"type":"response.create","model":"shared-model","stream_id":"s2","input":[]}');
+  expect(JSON.parse((await full)[0].toString()).stream_id).toBe("s2");
+  expect(f.handshakes).toEqual(["Bearer initial", "Bearer second"]);
+  expect(f.frames).toHaveLength(4);
+  socket.close();
 });

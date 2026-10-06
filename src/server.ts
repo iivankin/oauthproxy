@@ -3,7 +3,7 @@ import { Accounts as CodexAccounts } from "./codex/accounts.ts";
 import { AccountStore as CodexStore } from "./codex/store.ts";
 import { Transport as CodexTransport } from "./codex/transport.ts";
 import { codexHttp, upgrade, proxyError, upstreamError } from "./codex/proxy.ts";
-import { NativeRelay } from "./codex/relay.ts";
+import type { SocketRelay } from "./codex/relay.ts";
 import { MAX_PAYLOAD } from "./codex/websocket.ts";
 import { streamResponses } from "./codex/sse.ts";
 import { authorized, handler } from "./proxy.ts";
@@ -31,7 +31,7 @@ export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, k
   const stats = new Stats();
   const admin = new AdminApi(accounts, codex, chatgpt);
   const claude = handler(accounts, key, stats);
-  const server = Bun.serve<NativeRelay>({
+  const server = Bun.serve<SocketRelay>({
     hostname, port, idleTimeout: 0, maxRequestBodySize: MAX_PAYLOAD,
     async fetch(request, server) {
       const url = new URL(request.url);

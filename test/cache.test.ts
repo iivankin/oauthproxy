@@ -7,10 +7,14 @@ const prepare = (input: Message) => prepareBody(input, { promptId: crypto.random
   account: { accountUuid: crypto.randomUUID(), deviceId: "a".repeat(64) } });
 const normalizedMessages: Message["messages"] = [{ role: "user", content: [{ type: "text", text: "Hello" }] }];
 
-test("default caches identity, custom system and message tail, but not billing", () => {
+test("default keeps only billing and caller system, caching the system tail and last message", () => {
   const output = prepare(base);
   expect(output.system[0]).not.toHaveProperty("cache_control");
-  expect(output.system.slice(1).every(block => JSON.stringify(block.cache_control) === '{"type":"ephemeral","ttl":"1h"}')).toBe(true);
+  expect(output.system.slice(1)).toEqual([{ type: "text", text: "Custom", cache_control: { type: "ephemeral", ttl: "1h" } }]);
+  const withoutSystem = prepare({ ...base, system: undefined });
+  expect(withoutSystem.system).toHaveLength(1);
+  expect(withoutSystem.system[0]!.text).toStartWith("x-anthropic-billing-header:");
+  expect(withoutSystem.system[0]).not.toHaveProperty("cache_control");
   expect(output.messages[0]!.content).toEqual([{ type: "text", text: "Hello", cache_control: { type: "ephemeral", ttl: "1h" } }]);
   expect(base.messages[0]!.content).toBe("Hello");
 });
@@ -18,8 +22,8 @@ test("default caches identity, custom system and message tail, but not billing",
 test("caller breakpoints and TTLs are preserved without adding a fifth marker", () => {
   const system = Array.from({ length: 4 }, (_, i) => ({ type: "text" as const, text: `Block ${i}`, cache_control: { type: "ephemeral", ttl: "5m" } }));
   const output = prepare({ ...base, system });
-  expect(output.system.slice(2)).toEqual(system);
-  expect(output.system[1]).not.toHaveProperty("cache_control");
+  expect(output.system.slice(1)).toEqual(system);
+  expect(output.system[0]).not.toHaveProperty("cache_control");
   expect(output.messages).toEqual(normalizedMessages);
 });
 

@@ -2,6 +2,8 @@ import { randomInt } from "node:crypto";
 import { AccountStore } from "./store.ts";
 import { Transport, UpstreamError } from "./transport.ts";
 import { accountFromTokens, catalogSchema, usageSchema, type Account, type Catalog, type Tokens, type Usage } from "./schema.ts";
+import { dirname, join } from "node:path";
+import { SessionBindings } from "../session-bindings.ts";
 
 export class SelectionError extends Error {}
 const permanentRefreshCodes = new Set(["invalid_grant", "refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated"]);
@@ -24,7 +26,11 @@ export function usageAllowed(usage: Usage, model?: string) {
 export class Accounts {
   private readonly usageCache = new Map<string, { at: number; value: Usage }>();
   private readonly modelCache = new Map<string, { at: number; value: Catalog }>();
-  constructor(readonly store: AccountStore, readonly transport: Transport) {}
+  private readonly limitedUntil = new Map<string, number>();
+  readonly bindings: SessionBindings;
+  constructor(readonly store: AccountStore, readonly transport: Transport) {
+    this.bindings = new SessionBindings(join(dirname(store.path), ".session-bindings"), "codex");
+  }
 
   async add(tokens: Tokens, name?: string) {
     const account = accountFromTokens(tokens, name);
@@ -38,6 +44,7 @@ export class Accounts {
     });
     this.usageCache.delete(account.id);
     this.modelCache.delete(account.id);
+    this.limitedUntil.delete(account.id);
     return { id: account.id, name: account.name, accountId: account.accountId };
   }
 
@@ -90,24 +97,46 @@ export class Accounts {
     return value;
   }
 
-  async choose(model?: string) {
-    const accounts = (await this.store.read()).accounts.filter(account => !account.disabled);
+  async choose(model?: string, sessionId?: string, excluded: ReadonlySet<string> = new Set()) {
+    if (sessionId && model) return this.bindings.select(sessionId, model, preferredId => this.pick(model, preferredId, excluded));
+    return this.pick(model, undefined, excluded);
+  }
+
+  private async pick(model?: string, preferredId?: string, excluded: ReadonlySet<string> = new Set()) {
+    const accounts = (await this.store.read()).accounts.filter(account => !account.disabled && !excluded.has(account.id));
+    let preferredFailed = false;
     const candidates = await Promise.all(accounts.map(async account => {
+      if ((this.limitedUntil.get(account.id) ?? 0) > Date.now()) return undefined;
       try {
-        if (!usageAllowed(await this.usage(account.id), model)) return undefined;
+        const usage = await this.usage(account.id);
+        if (account.id === preferredId && typeof usage.rate_limit?.allowed !== "boolean")
+          throw new SelectionError("Bound account quota is unknown");
+        if (!usageAllowed(usage, model)) return undefined;
         if (model && !(await this.models(account.id)).models.some(m => m.slug === model)) return undefined;
         return account.id;
       } catch {
+        preferredFailed ||= account.id === preferredId;
         console.warn(`[accounts] Cannot verify quota/model for ${account.id}; skipping`);
         return undefined;
       }
     }));
+    if (preferredFailed) throw new SelectionError("Cannot verify the bound account quota/model");
     const eligible = candidates.filter((id): id is string => id !== undefined);
     if (!eligible.length) throw new SelectionError("No account with verified available quota/model; check accounts usage");
+    if (preferredId && eligible.includes(preferredId)) return preferredId;
     return eligible[randomInt(eligible.length)]!;
   }
 
   invalidateUsage(id: string) { this.usageCache.delete(id); }
+
+  limit(id: string, error: Record<string, unknown>, retryAfter?: string | null) {
+    const reset = typeof error.resets_at === "number" ? error.resets_at * 1000 : NaN;
+    const retry = retryAfter ? Number(retryAfter) * 1000 + Date.now() : NaN;
+    // Only confirmed usage_limit_reached enters this short admission cooldown;
+    // after it expires we still verify backend usage, never assume refill.
+    this.limitedUntil.set(id, reset > Date.now() ? reset : retry > Date.now() ? retry : Date.now() + 60_000);
+    this.invalidateUsage(id);
+  }
 
   async status() {
     return (await this.store.read()).accounts.map(({ id, name, accountId, expiresAt, disabled }) =>

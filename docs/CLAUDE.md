@@ -8,14 +8,14 @@ Headers:
 
 - `Content-Type: application/json`.
 - `Authorization: Bearer <PROXY_API_KEY>` or `x-api-key`, if configured.
-- `x-claude-code-session-id: <UUID>`: reuse across turns. If missing, the proxy warns, generates one and returns it.
+- `x-claude-code-session-id: <session-id>`: reuse across turns. An explicit ID is required; alternative fields and routing are described in [Sessions](SESSIONS.md).
 - `x-claude-code-prompt-id: <UUID>`: optional gateway hint; when supplied, it is also used by the billing metadata.
 - `anthropic-usage-limit: extended|slow`: forwards Claude Code's server-controlled wrap-up or lower-priority mode.
 - `anthropic-beta`: merged with body `betas` and the proxy's default flags.
 
-The proxy uses `@anthropic-ai/sdk` with retries disabled. It adds the Agent SDK identity and billing line to `system`, account/session metadata, and previous-message diagnostics. It does not add built-in tools, email context or title generation.
+The proxy uses `@anthropic-ai/sdk` with retries disabled. It adds the billing line to `system`, account/session metadata, and previous-message diagnostics. It does not inject an agent identity prompt, built-in tools, email context or title generation.
 
-Without explicit cache settings, it adds one-hour cache markers to the SDK identity, custom system tail and last eligible message block. Explicit cache settings are preserved.
+Without explicit cache settings, it adds one-hour cache markers to the custom system tail and last eligible message block. The billing line stays uncached. Explicit cache settings are preserved.
 
 ## Responses
 
@@ -27,7 +27,7 @@ Upstream status, error bodies, request IDs, retry/quota/refusal headers and unkn
 
 ## Routing and retries
 
-The first request randomly selects an account with verified quota and model access. Completed history pins later turns to that account through the CAS, including after a restart and compaction. Confirmed quota exhaustion can switch the turn to another eligible account. Quota and models are cached for five minutes.
+The first request randomly selects an account with verified quota and model access. A durable `(provider, session, model)` binding pins later turns, including after a restart and compaction. The CAS separately supplies previous-message diagnostics. Confirmed quota exhaustion can switch the turn to another eligible account. Quota and models are cached for five minutes.
 
 `extended` lets Anthropic decide whether an in-progress turn has a short grace window across its normal usage boundary. `slow` may cross the session limit but still requires weekly quota. Slow-lane `slot_busy` responses are returned to the client with their retry headers instead of rotating accounts.
 
@@ -36,7 +36,7 @@ The proxy retries only:
 - Once after HTTP 401, following token refresh.
 - On confirmed subscription quota exhaustion, using another eligible account.
 
-`x-should-retry: false` disables retries. A generic 429, 5xx, refusal or SSE error does not trigger account switching. Quota detection requires HTTP 429, unified `rejected` status, a known exhausted window and no allowed overage. The proxy never enables paid extra usage.
+`x-should-retry: false` disables retries. A generic 429, 5xx, refusal or SSE error does not trigger account switching. Quota detection requires HTTP 429, unified `rejected` status, a known exhausted window and no allowed overage. Each account is tried at most once before forwarding a response. Once SSE starts, its original errors are returned without replay. The proxy never enables paid extra usage.
 
 Clients decide whether to retry other failures, respecting `Retry-After` / `retry-after-ms`. There is no request deduplication: retrying an ambiguous network failure may generate another response.
 

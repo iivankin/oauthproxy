@@ -52,6 +52,7 @@ export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: S
   const chatgptRequest = `curl '${origin}/chatgpt/v1/responses' \\
   -H '${authorization}' \\
   -H 'Content-Type: application/json' \\
+  -H 'session-id: example-session' \\
   -d '${JSON.stringify({ model: chatgptModel, input: [{ role: "user", content: "Hello" }], stream: true })}'`;
   return new Response(`<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
