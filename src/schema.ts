@@ -49,7 +49,8 @@ export type Profile = z.infer<typeof profileSchema>;
 export const messageSchema = z.object({
   model: z.string().min(1), max_tokens: z.number().int().positive(),
   messages: z.array(z.object({
-    role: z.enum(["user", "assistant"]),
+    // Claude Code sends mid-conversation system messages as API beta content.
+    role: z.enum(["user", "assistant", "system"]),
     content: z.union([z.string(), z.array(z.record(z.string(), z.unknown()))]),
   }).passthrough()).min(1),
   system: z.union([z.string(), z.array(z.object({

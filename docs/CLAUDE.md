@@ -15,6 +15,8 @@ Headers:
 
 The proxy uses `@anthropic-ai/sdk` with retries disabled. It adds the billing line to `system`, account/session metadata, and previous-message diagnostics. It does not inject an agent identity prompt, built-in tools, email context or title generation.
 
+Claude Code can use this server through `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` (the proxy key). Its billing block is replaced, not duplicated; its instructions, tools, cache markers and mid-conversation `system` messages are preserved. No attribution opt-out is needed.
+
 Without explicit cache settings, it adds one-hour cache markers to the custom system tail and last eligible message block. The billing line stays uncached. Explicit cache settings are preserved.
 
 ## Responses

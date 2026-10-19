@@ -49,7 +49,10 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
       let raw: unknown;
       try { raw = await request.json(); } catch { return errorResponse(400, "Invalid JSON"); }
       const input = messageSchema.safeParse(raw);
-      if (!input.success) return errorResponse(400, "Invalid Messages request: model, max_tokens and messages are required");
+      if (!input.success) {
+        const issue = input.error.issues[0]!;
+        return errorResponse(400, `Invalid Messages request: ${issue.path.join(".") || "body"}: ${issue.message}`);
+      }
       const sessionId = extractSessionId(request.headers, raw);
       if (!sessionId) { console.warn(`[claude] ${MISSING_SESSION}`); return errorResponse(400, MISSING_SESSION); }
       const rawUsageLimit = request.headers.get("anthropic-usage-limit");

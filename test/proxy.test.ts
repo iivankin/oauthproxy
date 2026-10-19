@@ -481,6 +481,39 @@ test("Claude affinity persists without an assistant-history lookup, across equiv
   expect(new Set(calls).size).toBe(1);
 });
 
+test("CLI system-role messages and new beta fields pass through unchanged", async () => {
+  let forwarded: Record<string, unknown> | undefined;
+  let headers: Headers | undefined;
+  const accounts = await setup(async (url, init) => {
+    const control = controlPlane(url, init);
+    if (control) return control;
+    forwarded = JSON.parse(String(init?.body));
+    headers = new Headers(init?.headers);
+    return Response.json({ id: "msg_cli", content: [{ type: "text", text: "OK" }] });
+  }, ["a"]);
+  const messages = [
+    { role: "user", content: [{ type: "text", text: "hi" }] },
+    { role: "system", content: [{ type: "text", text: "Runtime context", cache_control: { type: "ephemeral" } }] },
+  ];
+  const response = await handler(accounts)(makeRequest({ ...input, messages,
+    safeguards: { mode: "test" }, output_config: { effort: "low" } },
+  { "anthropic-beta": "mid-conversation-system-2026-04-07" }));
+  expect(response.status).toBe(200);
+  expect(forwarded?.messages).toEqual(messages);
+  expect(forwarded?.safeguards).toEqual({ mode: "test" });
+  expect(forwarded?.output_config).toEqual({ effort: "low" });
+  expect(headers?.get("anthropic-beta")).toContain("mid-conversation-system-2026-04-07");
+});
+
+test("invalid message envelopes identify the failing field before upstream", async () => {
+  let calls = 0;
+  const accounts = await setup(async () => { calls++; return new Response(); }, ["a"]);
+  const response = await handler(accounts)(makeRequest({ ...input, messages: [{ role: "invalid", content: "hi" }] }));
+  expect(response.status).toBe(400);
+  expect((await response.json()).error.message).toContain("messages.0.role");
+  expect(calls).toBe(0);
+});
+
 test("missing session ID warns and rejects before upstream; body IDs and non-UUID header IDs are accepted", async () => {
   const accounts = await setup(async (url, init) => controlPlane(url, init) ?? Response.json({ id: "msg_test", content: [] }), ["a"]);
   const warn = spyOn(console, "warn").mockImplementation(() => {});

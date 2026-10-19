@@ -30,7 +30,9 @@ export function prepareBody(input: Message, context: RequestContext) {
     ? ` cc_prev_req=${previousRequestId};` : "";
   // CCH is finalized over the SDK's serialized body in the fetch wrapper.
   const billing = `x-anthropic-billing-header: cc_version=${CLI_VERSION}.${fingerprint(input)}; cc_entrypoint=sdk-ts; cch=00000;${previous} cc_prompt_id=${promptId}; cc_turn_origin=sdk;`;
-  const system = typeof input.system === "string" ? [{ type: "text" as const, text: input.system }] : [...(input.system ?? [])];
+  const callerSystem = typeof input.system === "string" ? [{ type: "text" as const, text: input.system }] : (input.system ?? []);
+  // Replace only transport attribution; preserve the CLI's actual instructions and cache markers.
+  const system = callerSystem.filter(block => !block.text.startsWith("x-anthropic-billing-header:"));
   system.unshift({ type: "text", text: billing });
   const userMetadata = typeof metadata === "object" && metadata !== null && !Array.isArray(metadata) ? metadata : {};
   const thinkingEnabled = typeof thinking === "object" && thinking !== null && "type" in thinking && thinking.type !== "disabled";
