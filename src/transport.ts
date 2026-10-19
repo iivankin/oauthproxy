@@ -9,8 +9,9 @@ import { relayMessage } from "./message-stream.ts";
 import { HistoryStore } from "./history-store.ts";
 import { historyHash, previousHistoryHash } from "./history.ts";
 import type { UsageLimitMode } from "./quota.ts";
+import { nativeHeaders, type NativeMessage } from "./claude-request.ts";
 
-export type Fetch = (url: string | URL, init?: RequestInit) => Promise<Response>;
+export type Fetch = (url: string | URL, init?: RequestInit & { decompress?: boolean }) => Promise<Response>;
 export const OAUTH = {
   clientId: "9d1c250a-e61b-44d9-88ed-5944d1962f5e",
   authorize: "https://claude.com/cai/oauth/authorize",
@@ -111,6 +112,13 @@ export class Transport {
 
   request(account: Tokens, path: string) {
     return this.response(this.client(account).get(path, { timeout: 15_000 }).asResponse());
+  }
+
+  nativeMessage(account: Tokens, wire: NativeMessage, signal: AbortSignal) {
+    return this.fetcher(`${this.origin}/v1/messages${wire.search}`, {
+      method: "POST", body: wire.body, headers: nativeHeaders(wire.headers, account.accessToken),
+      signal, redirect: "error", decompress: false,
+    });
   }
 
   async message(account: Account, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal,

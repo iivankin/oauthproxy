@@ -1,11 +1,12 @@
 import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { Accounts } from "./accounts.ts";
-import { AppError, messageSchema } from "./schema.ts";
+import { AppError } from "./schema.ts";
 import { exhaustedQuota } from "./quota.ts";
 import type { UsageLimitMode } from "./quota.ts";
 import { Stats } from "./stats.ts";
 import { sessionId as extractSessionId, MISSING_SESSION } from "./session-id.ts";
+import { endToEndHeaders, readMessage } from "./claude-request.ts";
 
 export function authorized(request: Pick<Request, "headers">, key?: string) {
   if (!key) return true;
@@ -19,8 +20,9 @@ function errorResponse(status: number, message: string) {
     { status, headers: { "cache-control": "no-store", ...(status === 429 && { "retry-after": "30" }) } });
 }
 
-function forward(response: Response, sessionId: string) {
-  const headers = new Headers(response.headers);
+function forward(response: Response, sessionId: string, native = false) {
+  const headers = endToEndHeaders(response.headers);
+  if (native) return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   // fetch decodes compressed bodies; forwarding their old length/encoding corrupts responses.
   for (const header of ["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive", "set-cookie"])
     headers.delete(header);
@@ -46,42 +48,39 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
       if (request.method !== "POST" || url.pathname !== "/v1/messages") return errorResponse(404, "Not found");
       if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json"))
         return errorResponse(415, "Content-Type must be application/json");
-      let raw: unknown;
-      try { raw = await request.json(); } catch { return errorResponse(400, "Invalid JSON"); }
-      const input = messageSchema.safeParse(raw);
-      if (!input.success) {
-        const issue = input.error.issues[0]!;
-        return errorResponse(400, `Invalid Messages request: ${issue.path.join(".") || "body"}: ${issue.message}`);
-      }
-      const sessionId = extractSessionId(request.headers, raw);
+      const submission = await readMessage(request);
+      const native = submission.kind === "cli";
+      const sessionId = extractSessionId(request.headers, submission.payload);
       if (!sessionId) { console.warn(`[claude] ${MISSING_SESSION}`); return errorResponse(400, MISSING_SESSION); }
       const rawUsageLimit = request.headers.get("anthropic-usage-limit");
-      if (rawUsageLimit !== null && rawUsageLimit !== "extended" && rawUsageLimit !== "slow")
+      if (!native && rawUsageLimit !== null && rawUsageLimit !== "extended" && rawUsageLimit !== "slow")
         return errorResponse(400, "anthropic-usage-limit must be extended or slow");
-      const usageLimit = rawUsageLimit as UsageLimitMode | null;
+      const usageLimit: UsageLimitMode | undefined = rawUsageLimit === "extended" || rawUsageLimit === "slow" ? rawUsageLimit : undefined;
       const gatewayPromptId = request.headers.get("x-claude-code-prompt-id");
-      if (gatewayPromptId !== null && !z.uuid().safeParse(gatewayPromptId).success)
+      if (!native && gatewayPromptId !== null && !z.uuid().safeParse(gatewayPromptId).success)
         return errorResponse(400, "x-claude-code-prompt-id must be a UUID");
-      const betas = [...(input.data.betas ?? []), ...(request.headers.get("anthropic-beta") ?? "").split(",")].map(s => s.trim()).filter(Boolean);
       const promptId = gatewayPromptId ?? crypto.randomUUID();
       const excluded = new Set<string>();
       const signal = AbortSignal.any([request.signal, AbortSignal.timeout(600_000)]);
-      const preferredId = await accounts.continuationAccount(sessionId, input.data);
+      const preferredId = submission.kind === "sdk" ? await accounts.continuationAccount(sessionId, submission.input) : undefined;
       const chooseOptions = { sessionId, ...(usageLimit && { usageLimit }), ...(preferredId && { preferredId }) };
-      let id = await accounts.choose(input.data.model, excluded, chooseOptions);
+      const send = submission.kind === "cli"
+        ? (id: string) => accounts.nativeMessage(id, submission.wire, signal)
+        : (id: string) => accounts.message(id, submission.input, sessionId, promptId,
+          [...(submission.input.betas ?? []), ...(request.headers.get("anthropic-beta") ?? "").split(",")].map(s => s.trim()).filter(Boolean), signal,
+          { ...(usageLimit && { usageLimit }), ...(gatewayPromptId && { gatewayPromptId }) });
+      let id = await accounts.choose(submission.model, excluded, chooseOptions);
       for (;;) {
         excluded.add(id);
-        const response = await stats.http("Claude", id, signal, () =>
-          accounts.message(id, input.data, sessionId, promptId, betas, signal,
-            { ...(usageLimit && { usageLimit }), ...(gatewayPromptId && { gatewayPromptId }) }));
+        const response = await stats.http("Claude", id, signal, () => send(id));
         const scope = exhaustedQuota(response);
-        if (!scope) return forward(response, sessionId);
-        accounts.limited(id, response.headers, scope === "model" ? input.data.model : undefined);
-        if (response.headers.get("x-should-retry") === "false") return forward(response, sessionId);
+        if (!scope) return forward(response, sessionId, native);
+        accounts.limited(id, response.headers, scope === "model" ? submission.model : undefined);
+        if (response.headers.get("x-should-retry") === "false") return forward(response, sessionId, native);
         // Keep the original rejection until another eligible account is found;
         // a local selection failure must not replace its body or retry headers.
-        try { id = await accounts.choose(input.data.model, excluded, chooseOptions); }
-        catch { return forward(response, sessionId); }
+        try { id = await accounts.choose(submission.model, excluded, chooseOptions); }
+        catch { return forward(response, sessionId, native); }
         await response.body?.cancel();
       }
     } catch (error) {

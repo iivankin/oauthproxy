@@ -6,6 +6,7 @@ import { hasQuota, retryAt, type UsageLimitMode } from "./quota.ts";
 import { previousHistoryHash } from "./history.ts";
 import { dirname, join } from "node:path";
 import { SessionBindings } from "./session-bindings.ts";
+import type { NativeMessage } from "./claude-request.ts";
 
 type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
 type MessageHints = { usageLimit?: UsageLimitMode; gatewayPromptId?: string };
@@ -88,6 +89,10 @@ export class Accounts {
   message(id: string, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal,
     hints: MessageHints = {}) {
     return this.authenticated(id, account => this.transport.message(account, input, sessionId, promptId, betas, signal, hints));
+  }
+
+  nativeMessage(id: string, wire: NativeMessage, signal: AbortSignal) {
+    return this.authenticated(id, account => this.transport.nativeMessage(account, wire, signal));
   }
 
   usage(id: string, force = false): Promise<Usage> {
