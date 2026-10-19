@@ -41,7 +41,7 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
       if (request.method === "GET" && url.pathname === "/health") return Response.json({ ok: true });
       if (request.method === "GET" && url.pathname === "/claude/accounts")
         return Response.json(await accounts.status(), { headers: { "cache-control": "no-store" } });
-      if (request.method === "GET" && url.pathname === "/claude/v1/models") {
+      if (request.method === "GET" && ["/v1/models", "/claude/v1/models"].includes(url.pathname)) {
         const data = await accounts.allModels();
         return Response.json({ data, has_more: false, first_id: data[0]?.id ?? null, last_id: data.at(-1)?.id ?? null });
       }

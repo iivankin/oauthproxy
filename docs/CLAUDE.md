@@ -17,6 +17,8 @@ Native Claude Code is detected by `User-Agent: claude-cli/...` without `agent-sd
 
 Claude Code can use `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` (the proxy key) with no attribution opt-out. Native metadata is not rebound to the selected account; any upstream account-mismatch rejection is returned unchanged.
 
+Set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` to load the proxy's catalog into `/model`. `--model` is optional; without it, Claude Code uses its saved or default model.
+
 Other clients, including Agent SDK, use `@anthropic-ai/sdk` with retries disabled. This path adds a billing line to `system`, selected-account metadata and CAS previous-message diagnostics, replacing any caller billing block. It does not inject an agent identity prompt, built-in tools, email context or title generation.
 
 On the SDK path only, absent explicit cache settings, it adds one-hour markers to the custom system tail and last eligible message block. The billing line stays uncached. Explicit cache settings are preserved.
@@ -56,7 +58,7 @@ Account switches do not transfer previous-response IDs. Cross-account portabilit
 
 ## Other routes
 
-- `GET /claude/v1/models`: combined catalog, not a quota guarantee.
+- `GET /v1/models` or `/claude/v1/models`: combined Claude catalog, not a quota guarantee.
 - `GET /claude/accounts`: account metadata and usage, without tokens.
 - `GET /health`: local server health only.
 

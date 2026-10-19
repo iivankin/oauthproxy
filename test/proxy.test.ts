@@ -44,6 +44,29 @@ function controlPlane(url: string | URL, init?: RequestInit) {
   return undefined;
 }
 
+test("gateway model discovery serves the Claude catalog on both authenticated routes", async () => {
+  let attempts = 0;
+  const model = { id: input.model, type: "model", display_name: "Haiku", created_at: "2025-10-01T00:00:00Z" };
+  const accounts = await setup(async url => {
+    expect(new URL(url).pathname).toBe("/v1/models");
+    attempts++;
+    return Response.json({ data: [model], has_more: false });
+  });
+  const server = serve(accounts, "127.0.0.1", 0, "local-secret");
+  try {
+    expect((await fetch(new URL("/v1/models", server.url))).status).toBe(401);
+    expect(attempts).toBe(0);
+    for (const path of ["/v1/models", "/claude/v1/models"]) {
+      const response = await fetch(new URL(path, server.url), { headers: {
+        authorization: "Bearer local-secret", "anthropic-version": "2023-06-01", "user-agent": "claude-cli/2.1.303",
+      } });
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ data: [model], has_more: false, first_id: model.id, last_id: model.id });
+    }
+    expect(attempts).toBe(2);
+  } finally { server.stop(); }
+});
+
 describe("account routing and quota", () => {
   test("status loads and caches quota before a rate-limited profile", async () => {
     let usageAttempts = 0, profileAttempts = 0;

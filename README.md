@@ -3,6 +3,7 @@
 One Bun server for Claude, legacy Codex, and ChatGPT plan sharing.
 
 - `POST /v1/messages` — Claude JSON/SSE.
+- `GET /v1/models` — Claude catalog for gateway model discovery.
 - `POST /v1/responses` — Codex SSE over native HTTPS.
 - `WS /v1/responses` — Codex WebSocket forwarding; one account per connection.
 - `POST` and `WS /chatgpt/v1/responses` — Sign in with ChatGPT through the public Responses API.
