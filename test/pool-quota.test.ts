@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "bun:test";
+import { afterEach, expect, spyOn, test } from "bun:test";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -27,7 +27,7 @@ async function setup(fetcher: Fetch, ids = ["a", "b"]) {
   const store = new AccountStore(join(directory, "accounts.json"));
   await store.update(data => { data.accounts = ids.map(id => accountSchema.parse({ id, name: id, email: `${id}@test.invalid`,
     organizationId: "org", accountUuid: crypto.randomUUID(), deviceId: "a".repeat(64),
-    accessToken: id, expiresAt: Date.now() + hour,
+    accessToken: id, expiresAt: Date.now() + 24 * hour,
   })); });
   return new Accounts(store, new Transport(fetcher, "https://mock.invalid"));
 }
@@ -123,4 +123,36 @@ test("no synthetic pool reset when a reset is unknown or another account is avai
   expect(response.headers.get("retry-after")).toBe("123");
   expect(response.headers.get("x-should-retry")).toBe("false");
   expect(sends).toBe(1);
+});
+
+test("pool reset survives catalog expiry during account and model cooldowns, then refreshes after reset", async () => {
+  for (const claim of ["five_hour", "seven_day_sonnet"]) {
+    let reads = 0, sends = 0;
+    let at = Date.now();
+    const reset = Math.floor((at + 2 * hour) / 1000);
+    const accounts = await setup(async url => {
+      if (new URL(url).pathname === "/api/oauth/usage") { reads++; return Response.json(usage()); }
+      if (new URL(url).pathname === "/v1/models") { reads++; return Response.json({ data: [{ id: model }] }); }
+      sends++;
+      return new Response("original", { status: 429, headers: {
+        "anthropic-ratelimit-unified-status": "rejected", "anthropic-ratelimit-unified-representative-claim": claim,
+        "anthropic-ratelimit-unified-reset": String(reset),
+      } });
+    });
+    const clock = spyOn(Date, "now").mockImplementation(() => at);
+    try {
+      const handle = handler(accounts);
+      expect((await handle(request())).headers.get("anthropic-ratelimit-unified-reset")).toBe(String(reset));
+      at += 6 * 60_000;
+      const response = await handle(request());
+      expect(response.status).toBe(429);
+      expect(response.headers.get("anthropic-ratelimit-unified-reset")).toBe(String(reset));
+      expect({ reads, sends }).toEqual({ reads: 4, sends: 2 });
+      // An expired rejection/catalog must not manufacture a future reset.
+      at = (reset + 1) * 1000;
+      expect(await accounts.poolQuotaReset(model)).toBeUndefined();
+      expect(await accounts.choose(model)).toBeTruthy();
+      expect(reads).toBe(8);
+    } finally { clock.mockRestore(); }
+  }
 });

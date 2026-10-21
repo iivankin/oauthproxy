@@ -15,7 +15,7 @@ Headers:
 
 Native Claude Code is detected by `User-Agent: claude-cli/...` without `agent-sdk/...` or `sdk-ts`/`sdk-py`. Its Messages requests bypass SDK preparation: body bytes (including gzip), query, metadata, billing/CCH, diagnostics, beta flags and application headers are preserved. Only authorization is replaced; the proxy key and HTTP hop-by-hop/authority/framing headers are not forwarded. Response bytes, encoding and end-to-end headers are preserved too. Routing still requires a session ID and retains account affinity, token refresh and confirmed-quota failover.
 
-Claude Code can use `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN` (the proxy key) with no attribution opt-out. Native metadata is not rebound to the selected account; any upstream account-mismatch rejection is returned unchanged.
+For Claude Code, set `ANTHROPIC_BASE_URL` to the proxy and `CLAUDE_CODE_OAUTH_TOKEN` to the proxy key. Clear `ANTHROPIC_AUTH_TOKEN` and `ANTHROPIC_API_KEY`: generic bearer/API-key mode bypasses Claude Code's subscription-limit handling even when reset headers are present. No attribution opt-out is needed. Native metadata is not rebound to the selected account; any upstream account-mismatch rejection is returned unchanged.
 
 Set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` to load the proxy's catalog into `/model`. `--model` is optional; without it, Claude Code uses its saved or default model.
 
@@ -47,6 +47,8 @@ The proxy retries only:
 Clients decide whether to retry other failures, respecting `Retry-After` / `retry-after-ms`. There is no request deduplication: retrying an ambiguous network failure may generate another response.
 
 When every enabled, model-compatible account is confirmed quota-exhausted and all reset times are known, local and final upstream 429s advertise the earliest pool availability in `anthropic-ratelimit-unified-reset`, with the corresponding representative claim and `Retry-After` (also `retry-after-ms` if present). Each account must clear all its blocking windows first. This is the only quota-header override; the upstream body and other headers stay intact. Unknown resets, locks, available accounts and ordinary rate limits do not receive a synthetic pool reset. Claude Code applies its own auto-resume policy and jitter.
+
+During a confirmed-quota cooldown, its last verified model catalog is retained with the rejection so the reset survives the normal five-minute cache expiry. Selection refreshes quota and models after cooldown. Claude Code 2.1.306's automatic continuation also requires an interactive foreground session; background jobs do not auto-resume through this mechanism.
 
 ## History and compaction
 

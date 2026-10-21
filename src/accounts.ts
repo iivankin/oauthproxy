@@ -10,7 +10,7 @@ import type { NativeMessage } from "./claude-request.ts";
 
 type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
 type MessageHints = { usageLimit?: UsageLimitMode; gatewayPromptId?: string };
-type Cooldown = { until: number; reset?: QuotaReset; usage?: Promise<Usage> };
+type Cooldown = { until: number; reset?: QuotaReset; usage?: Promise<Usage>; models?: Promise<Model[]> };
 
 export class Accounts {
   private usageCache = new Map<string, { until: number; value: Promise<Usage> }>();
@@ -183,7 +183,7 @@ export class Accounts {
 
   limited(id: string, headers: Headers, model?: string) {
     const entry: Cooldown = { until: retryAt(headers), reset: responseQuotaReset(headers),
-      usage: this.usageCache.get(id)?.value };
+      usage: this.usageCache.get(id)?.value, models: this.modelsCache.get(id)?.value };
     if (model) {
       const windows = this.modelCooldown.get(id) ?? new Map<string, Cooldown>();
       windows.set(model, entry);
@@ -197,13 +197,15 @@ export class Accounts {
     let earliest: QuotaReset | undefined;
     for (const account of (await this.store.read()).accounts.filter(item => !item.disabled)) {
       // Use observations from selection; no extra network calls on the error path.
-      const models = this.modelsCache.get(account.id);
-      if (!models || models.until <= now) return;
-      const catalog = await models.value.catch(() => undefined);
-      if (!catalog) return;
-      if (!catalog.some(item => item.id === model)) continue;
       const cooldowns = [this.cooldown.get(account.id), this.modelCooldown.get(account.id)?.get(model)]
         .filter((entry): entry is Cooldown => !!entry && entry.until > now);
+      const models = this.modelsCache.get(account.id);
+      // Selection skips cooling accounts, so the ordinary catalog TTL can expire
+      // without a refresh. Retain the last verified catalog with the rejection.
+      const modelObservation = models && models.until > now ? models.value : cooldowns.find(entry => entry.models)?.models;
+      const catalog = await modelObservation?.catch(() => undefined);
+      if (!catalog) return;
+      if (!catalog.some(item => item.id === model)) continue;
       const cached = this.usageCache.get(account.id);
       const observation = cached && cached.until > now ? cached.value : cooldowns.find(entry => entry.usage)?.usage;
       const usage = await observation?.catch(() => undefined);
