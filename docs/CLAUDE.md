@@ -46,6 +46,8 @@ The proxy retries only:
 
 Clients decide whether to retry other failures, respecting `Retry-After` / `retry-after-ms`. There is no request deduplication: retrying an ambiguous network failure may generate another response.
 
+When every enabled, model-compatible account is confirmed quota-exhausted and all reset times are known, local and final upstream 429s advertise the earliest pool availability in `anthropic-ratelimit-unified-reset`, with the corresponding representative claim and `Retry-After` (also `retry-after-ms` if present). Each account must clear all its blocking windows first. This is the only quota-header override; the upstream body and other headers stay intact. Unknown resets, locks, available accounts and ordinary rate limits do not receive a synthetic pool reset. Claude Code applies its own auto-resume policy and jitter.
+
 ## History and compaction
 
 Clients send the conversation history on every request. The proxy does not store or restore conversation text.

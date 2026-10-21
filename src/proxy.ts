@@ -2,8 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { z } from "zod";
 import { Accounts } from "./accounts.ts";
 import { AppError } from "./schema.ts";
-import { exhaustedQuota } from "./quota.ts";
-import type { UsageLimitMode } from "./quota.ts";
+import { exhaustedQuota, setPoolQuotaHeaders, type QuotaReset, type UsageLimitMode } from "./quota.ts";
 import { Stats } from "./stats.ts";
 import { sessionId as extractSessionId, MISSING_SESSION } from "./session-id.ts";
 import { endToEndHeaders, readMessage } from "./claude-request.ts";
@@ -15,13 +14,16 @@ export function authorized(request: Pick<Request, "headers">, key?: string) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
-function errorResponse(status: number, message: string) {
+function errorResponse(status: number, message: string, reset?: QuotaReset) {
+  const headers = new Headers({ "cache-control": "no-store", ...(status === 429 && { "retry-after": "30" }) });
+  setPoolQuotaHeaders(headers, reset);
   return Response.json({ type: "error", error: { type: status === 429 ? "rate_limit_error" : "api_error", message } },
-    { status, headers: { "cache-control": "no-store", ...(status === 429 && { "retry-after": "30" }) } });
+    { status, headers });
 }
 
-function forward(response: Response, sessionId: string, native = false) {
+function forward(response: Response, sessionId: string, native = false, reset?: QuotaReset) {
   const headers = endToEndHeaders(response.headers);
+  setPoolQuotaHeaders(headers, reset);
   if (native) return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
   // fetch decodes compressed bodies; forwarding their old length/encoding corrupts responses.
   for (const header of ["content-encoding", "content-length", "transfer-encoding", "connection", "keep-alive", "set-cookie"])
@@ -69,18 +71,27 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
         : (id: string) => accounts.message(id, submission.input, sessionId, promptId,
           [...(submission.input.betas ?? []), ...(request.headers.get("anthropic-beta") ?? "").split(",")].map(s => s.trim()).filter(Boolean), signal,
           { ...(usageLimit && { usageLimit }), ...(gatewayPromptId && { gatewayPromptId }) });
-      let id = await accounts.choose(submission.model, excluded, chooseOptions);
+      let id: string;
+      try { id = await accounts.choose(submission.model, excluded, chooseOptions); }
+      catch (error) {
+        if (error instanceof AppError && error.status === 429)
+          return errorResponse(429, error.message, await accounts.poolQuotaReset(submission.model, usageLimit).catch(() => undefined));
+        throw error;
+      }
+      const quotaResponse = async (response: Response) => forward(response, sessionId, native,
+        await accounts.poolQuotaReset(submission.model, usageLimit).catch(() => undefined));
       for (;;) {
         excluded.add(id);
         const response = await stats.http("Claude", id, signal, () => send(id));
         const scope = exhaustedQuota(response);
         if (!scope) return forward(response, sessionId, native);
         accounts.limited(id, response.headers, scope === "model" ? submission.model : undefined);
-        if (response.headers.get("x-should-retry") === "false") return forward(response, sessionId, native);
+        if (response.headers.get("x-should-retry") === "false") return quotaResponse(response);
         // Keep the original rejection until another eligible account is found;
-        // a local selection failure must not replace its body or retry headers.
+        // a local selection failure must not replace its body. Only a verified
+        // pool-wide reset can replace the final account's retry timing.
         try { id = await accounts.choose(submission.model, excluded, chooseOptions); }
-        catch { return forward(response, sessionId, native); }
+        catch { return quotaResponse(response); }
         await response.body?.cancel();
       }
     } catch (error) {

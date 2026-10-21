@@ -2,7 +2,7 @@ import { randomInt, randomBytes } from "node:crypto";
 import { AccountStore } from "./store.ts";
 import { Transport, UpstreamError, jsonResponse } from "./transport.ts";
 import { AppError, modelsPageSchema, profileSchema, usageSchema, safeAccount, type Tokens, type Usage, type Model, type Account, type Message, type Profile } from "./schema.ts";
-import { hasQuota, retryAt, type UsageLimitMode } from "./quota.ts";
+import { hasQuota, quotaReset, responseQuotaReset, retryAt, type QuotaReset, type UsageLimitMode } from "./quota.ts";
 import { previousHistoryHash } from "./history.ts";
 import { dirname, join } from "node:path";
 import { SessionBindings } from "./session-bindings.ts";
@@ -10,13 +10,14 @@ import type { NativeMessage } from "./claude-request.ts";
 
 type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
 type MessageHints = { usageLimit?: UsageLimitMode; gatewayPromptId?: string };
+type Cooldown = { until: number; reset?: QuotaReset; usage?: Promise<Usage> };
 
 export class Accounts {
   private usageCache = new Map<string, { until: number; value: Promise<Usage> }>();
   private profileCache = new Map<string, { until: number; value: Promise<Profile> }>();
   private modelsCache = new Map<string, { until: number; value: Promise<Model[]> }>();
-  private cooldown = new Map<string, number>();
-  private modelCooldown = new Map<string, Map<string, number>>();
+  private cooldown = new Map<string, Cooldown>();
+  private modelCooldown = new Map<string, Map<string, Cooldown>>();
 
   readonly bindings: SessionBindings;
   constructor(readonly store = new AccountStore(), readonly transport = new Transport()) {
@@ -160,15 +161,16 @@ export class Accounts {
     let failed = false;
     let preferredFailed = false;
     const candidates = await Promise.all(accounts.map(async account => {
-      if ((this.cooldown.get(account.id) ?? 0) > Date.now()) return null;
-      if ((this.modelCooldown.get(account.id)?.get(model) ?? 0) > Date.now()) return null;
+      if ((this.cooldown.get(account.id)?.until ?? 0) > Date.now()) return null;
+      if ((this.modelCooldown.get(account.id)?.get(model)?.until ?? 0) > Date.now()) return null;
       try {
         const usage = await this.usage(account.id);
         if (account.id === options.preferredId && [usage.five_hour, usage.seven_day].some(window =>
           !window || typeof window.utilization !== "number")) throw new AppError(503, "Bound account quota is unknown");
-        if (!hasQuota(usage, model, options.usageLimit)) return null;
+        // Also verify model access for depleted accounts so a pool reset never
+        // points at an account that cannot serve the requested model.
         const models = await this.models(account.id);
-        return models.some(item => item.id === model) ? account.id : null;
+        return hasQuota(usage, model, options.usageLimit) && models.some(item => item.id === model) ? account.id : null;
       } catch { failed = true; preferredFailed ||= account.id === options.preferredId; return null; }
     }));
     if (preferredFailed) throw new AppError(503, "Cannot verify the bound account quota or models");
@@ -180,12 +182,44 @@ export class Accounts {
   }
 
   limited(id: string, headers: Headers, model?: string) {
+    const entry: Cooldown = { until: retryAt(headers), reset: responseQuotaReset(headers),
+      usage: this.usageCache.get(id)?.value };
     if (model) {
-      const windows = this.modelCooldown.get(id) ?? new Map<string, number>();
-      windows.set(model, retryAt(headers));
+      const windows = this.modelCooldown.get(id) ?? new Map<string, Cooldown>();
+      windows.set(model, entry);
       this.modelCooldown.set(id, windows);
-    } else this.cooldown.set(id, retryAt(headers));
+    } else this.cooldown.set(id, entry);
     this.usageCache.delete(id);
+  }
+
+  async poolQuotaReset(model: string, mode?: UsageLimitMode): Promise<QuotaReset | undefined> {
+    const now = Date.now();
+    let earliest: QuotaReset | undefined;
+    for (const account of (await this.store.read()).accounts.filter(item => !item.disabled)) {
+      // Use observations from selection; no extra network calls on the error path.
+      const models = this.modelsCache.get(account.id);
+      if (!models || models.until <= now) return;
+      const catalog = await models.value.catch(() => undefined);
+      if (!catalog) return;
+      if (!catalog.some(item => item.id === model)) continue;
+      const cooldowns = [this.cooldown.get(account.id), this.modelCooldown.get(account.id)?.get(model)]
+        .filter((entry): entry is Cooldown => !!entry && entry.until > now);
+      const cached = this.usageCache.get(account.id);
+      const observation = cached && cached.until > now ? cached.value : cooldowns.find(entry => entry.usage)?.usage;
+      const usage = await observation?.catch(() => undefined);
+      if (!usage) return;
+      const available = hasQuota(usage, model, mode);
+      let reset = available ? undefined : quotaReset(usage, model, mode, now);
+      if (!available && !reset) return;
+      for (const cooldown of cooldowns) {
+        if (!cooldown.reset || cooldown.reset.at <= now) return;
+        if (!reset || cooldown.reset.at > reset.at) reset = cooldown.reset;
+      }
+      // One eligible account (or an unknown reset) invalidates a pool-wide estimate.
+      if (!reset) return;
+      if (!earliest || reset.at < earliest.at) earliest = reset;
+    }
+    return earliest;
   }
 
   async status(force = false) {
