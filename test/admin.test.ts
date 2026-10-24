@@ -69,3 +69,28 @@ test("Codex admin flow returns the device code and exposes only safe completion 
   for (const secret of ["deviceAuthId", "a-refreshed", "a-refresh-rotated", "accessToken", "refreshToken"])
     expect(text).not.toContain(secret);
 });
+
+test("account deletion requires auth and same origin, persists and prevents further selection", async () => {
+  const f = await setup();
+  const target = `${f.url}admin/codex/accounts/${encodeURIComponent(f.a.id)}`;
+  expect((await fetch(target, { method: "DELETE" })).status).toBe(401);
+  expect((await fetch(target, { method: "DELETE", headers: { ...headers, origin: "https://attacker.invalid" } })).status).toBe(403);
+  expect((await f.accounts.store.read()).accounts).toHaveLength(2);
+  // Prime quota/model caches and a binding before deletion.
+  await f.accounts.choose("test-model", "delete-session", new Set([f.b.id]));
+  const removed = await fetch(target, { method: "DELETE", headers: { ...headers, origin: new URL(f.url).origin } });
+  expect(removed.status).toBe(204);
+  expect(await removed.text()).toBe("");
+  expect((await f.accounts.store.read()).accounts.map(account => account.id)).toEqual([f.b.id]);
+  await expect(f.accounts.token(f.a.id)).rejects.toThrow("missing");
+  expect(await f.accounts.choose("test-model", "delete-session")).toBe(f.b.id);
+  expect((await fetch(target, { method: "DELETE", headers })).status).toBe(404);
+
+  const claudeTarget = `${f.url}admin/claude/accounts/claude`;
+  expect((await fetch(claudeTarget, { method: "DELETE", headers })).status).toBe(204);
+  expect(await (await fetch(`${f.url}claude/accounts`, { headers })).json()).toEqual([]);
+  expect((await fetch(claudeTarget, { method: "DELETE", headers })).status).toBe(404);
+
+  const withoutKey = await setup({ key: null });
+  expect((await fetch(`${withoutKey.url}admin/codex/accounts/${f.b.id}`, { method: "DELETE" })).status).toBe(503);
+});

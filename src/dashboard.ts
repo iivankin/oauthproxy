@@ -16,11 +16,12 @@ function quota(row: Quota) {
     ${row.used === null ? "" : `<progress class="${row.blocked ? "limited" : ""}" max="100" value="${Math.max(0, Math.min(100, row.used))}" aria-label="${escape(row.label)} used"></progress>`}
     ${row.resets ? `<small>Resets ${escape(date(row.resets))}</small>` : ""}</div>`;
 }
-function account(row: DashboardAccount) {
+function account(row: DashboardAccount, canDelete: boolean) {
   return `<tr><td><strong>${escape(row.name)}</strong><small>${escape(row.identity)}</small></td>
     <td>${row.provider}</td><td>${escape(row.tier ?? "—")}</td><td><span class="status ${row.status === "Connected" ? "ok" : ""}">${escape(row.status)}</span></td>
     <td class="quotas">${row.quotas.map(quota).join("") || (row.provider === "ChatGPT"
-      ? '<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">ChatGPT Usage</a>' : "—")}</td></tr>`;
+      ? '<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">ChatGPT Usage</a>' : "—")}</td>
+    <td><button type="button" class="delete-account" data-provider="${row.provider.toLowerCase()}" data-account-id="${escape(row.id)}" data-account-label="${escape(row.identity || row.name)}"${canDelete ? "" : " disabled"}>Delete</button></td></tr>`;
 }
 
 export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: Stats, key?: string,
@@ -70,13 +71,14 @@ small,.muted{display:block;color:#94a0a9;font-size:12px;line-height:1.6}header s
 .connection{display:grid;grid-template-columns:auto 1fr;gap:8px 18px;border-top:1px solid #293035;border-bottom:1px solid #293035;padding:16px 0;margin-bottom:20px}.connection dt{color:#94a0a9}.connection dd{margin:0;overflow-wrap:anywhere}code,pre{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}code{color:#c4ddd0}pre{margin:0;padding:16px 0;border-top:1px solid #293035;color:#cbd4d9;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere}.examples{display:grid;grid-template-columns:1fr 1fr;gap:28px}.examples h3{font-size:13px;font-weight:550;margin:0 0 10px}
 .oauth{display:grid;grid-template-columns:1fr 1fr;gap:28px}.oauth section{border-top:1px solid #293035;padding-top:16px}.oauth h3{font-size:13px;font-weight:550;margin:0 0 14px}.oauth label{display:block;color:#94a0a9;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:12px 0 6px}.oauth input{width:100%;border:1px solid #374047;border-radius:4px;background:#151a1d;color:#e6eaed;padding:9px 10px;font:inherit}.actions{display:flex;align-items:center;gap:10px;margin-top:12px}.oauth button{border:1px solid #486052;border-radius:4px;background:#1b2821;color:#c4ddd0;padding:8px 12px;font:inherit;cursor:pointer}.oauth button:disabled{opacity:.45;cursor:default}.oauth a{padding:7px 11px}.oauth output{display:block;min-height:20px;margin-top:10px;color:#a4d1b9;font-size:12px}.oauth output.error{color:#d8b783}.device-code{display:inline-block;margin-top:12px;font-size:18px;letter-spacing:.08em}
 .model-heading{display:flex;align-items:center;gap:16px}.model-heading h2{margin-right:auto}.model-heading button{border:1px solid #486052;border-radius:4px;background:#1b2821;color:#c4ddd0;padding:8px 12px;font:inherit;cursor:pointer}.model-group{border-top:1px solid #293035;padding:14px 0}.model-group h3{font-size:13px;margin:0 0 8px}.model-group code{display:inline-block;margin:0 12px 8px 0}.model-group small{margin:0}
+.delete-account{background:transparent;border:1px solid #674744;color:#dfaaa3;border-radius:4px;padding:6px 10px;font:inherit;cursor:pointer}.delete-account:disabled{opacity:.45;cursor:default}
 @media(max-width:640px){main{padding:24px 16px}.summary{gap:0;justify-content:space-between}.summary strong{font-size:24px}td{padding-right:20px}.quotas{min-width:220px}.examples,.oauth{grid-template-columns:1fr}}
 </style></head><body><main data-api-key="${escape(key ?? "")}">
 <header><div><h1>OAuth Proxy</h1><small>${escape(date(new Date().toISOString()))} · Refreshes every 30s</small></div><a href="/dashboard">Refresh</a></header>
 <div class="summary"><div><small>Accounts</small><strong>${accounts.length}</strong></div><div><small>HTTP requests / WS sessions</small><strong>${sum("total")}</strong></div><div><small>Active</small><strong>${sum("active")}</strong></div><div><small>Errors</small><strong>${sum("errors")}</strong></div></div>
 ${errors.map(error => `<p class="error">${escape(error)}</p>`).join("")}
-<h2>Accounts &amp; quotas</h2><div class="table"><table><thead><tr><th>Account</th><th>Provider</th><th>Plan</th><th>Status</th><th>Quota used</th></tr></thead><tbody>
-${accounts.map(account).join("") || '<tr><td colspan="5" class="empty">No accounts connected</td></tr>'}</tbody></table></div>
+<h2>Accounts &amp; quotas</h2><output id="account-action-status" class="error" aria-live="polite"></output><div class="table"><table><thead><tr><th>Account</th><th>Provider</th><th>Plan</th><th>Status</th><th>Quota used</th><th>Actions</th></tr></thead><tbody>
+${accounts.map(row => account(row, Boolean(key))).join("") || '<tr><td colspan="6" class="empty">No accounts connected</td></tr>'}</tbody></table></div>
 <h2>Traffic</h2><div class="table"><table><thead><tr><th>Account</th><th>Provider</th><th>Transport</th><th>Total</th><th>Active</th><th>Completed</th><th>Errors</th><th>Cancelled</th></tr></thead><tbody>
 ${rows || '<tr><td colspan="8" class="empty">No traffic yet</td></tr>'}</tbody></table></div>
 <h2>Connect account</h2><div class="oauth">

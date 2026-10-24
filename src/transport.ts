@@ -21,8 +21,8 @@ export const OAUTH = {
 };
 
 export class UpstreamError extends Error {
-  constructor(public status: number, public code: string) {
-    super(`Anthropic HTTP ${status} (${code})`);
+  constructor(public status: number, public code: string, public accountOnHold = false) {
+    super(`Anthropic HTTP ${status} (${code}${accountOnHold ? "; account_on_hold" : ""})`);
   }
 }
 
@@ -35,10 +35,13 @@ export async function jsonResponse(response: Response): Promise<unknown> {
   try { value = await response.json(); }
   catch { throw new UpstreamError(response.status, "invalid_json_response"); }
   if (!response.ok) {
-    const error = z.object({ error: z.union([z.string(), z.object({ type: z.string() })]) }).safeParse(value);
+    const error = z.object({ error: z.union([z.string(), z.object({ type: z.string() })]),
+      error_description: z.string().optional() }).safeParse(value);
     const code = error.success ? (typeof error.data.error === "string" ? error.data.error : error.data.error.type) : "upstream_error";
     // Don't echo arbitrary upstream bodies: token endpoints can contain credentials.
-    throw new UpstreamError(response.status, code);
+    const onHold = error.success && error.data.error_description === "account_on_hold" &&
+      ["invalid_grant", "access_denied"].includes(code) && [400, 401, 403].includes(response.status);
+    throw new UpstreamError(response.status, code, onHold);
   }
   return value;
 }

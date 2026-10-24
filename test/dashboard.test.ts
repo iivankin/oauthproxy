@@ -41,6 +41,10 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(html).toContain('id="models-toggle"');
   expect(html).toContain('id="models-list"');
   expect(html).toContain('/chatgpt/v1/models');
+  expect(html).toContain('class="delete-account" data-provider="claude" data-account-id="claude"');
+  expect(html).toContain('class="delete-account" data-provider="codex"');
+  expect(html).toContain('data-account-label="codex@test.invalid"');
+  expect(html).toContain('confirm("Delete "');
   expect(html).toContain("/admin/claude/oauth/complete");
   expect(html).toContain("100%");
   expect(html).toContain("5h");

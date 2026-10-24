@@ -389,6 +389,34 @@ describe("credentials", () => {
     await expect(broken.token("a", "new")).rejects.toThrow("invalid_grant");
     expect((await accounts.store.read()).accounts[0]!.disabled).toBe(true);
   });
+
+  test("refresh holds and nonterminal HTTP errors preserve credentials and recover without login", async () => {
+    for (const [status, body] of [
+      [401, { error: "authentication_error" }],
+      [400, { error: "invalid_grant", error_description: "account_on_hold" }],
+      [401, { error: "invalid_grant", error_description: "account_on_hold" }],
+      [403, { error: "access_denied", error_description: "account_on_hold" }],
+      [429, { error: "rate_limit_error" }],
+      [503, { error: "invalid_grant" }],
+    ] as const) {
+      let failing = true;
+      const accounts = await setup(async () => failing ? Response.json(body, { status })
+        : Response.json({ access_token: "recovered", refresh_token: "rotated", expires_in: 3600 }), ["a"]);
+      await accounts.store.update(data => { data.accounts[0]!.expiresAt = 1; });
+      await expect(accounts.token("a")).rejects.toThrow(`Anthropic HTTP ${status}`);
+      const stored = (await accounts.store.read()).accounts[0]!;
+      expect(stored.disabled).toBe(false);
+      expect(stored.accessToken).toBe("a");
+      expect(stored.refreshToken).toBe("a-refresh");
+      if ("error_description" in body) {
+        const row = (await accounts.status())[0]!;
+        expect("error" in row && row.error).toBe("Account on hold");
+      }
+      failing = false;
+      expect((await accounts.token("a")).accessToken).toBe("recovered");
+      expect((await accounts.store.read()).accounts[0]!.refreshToken).toBe("rotated");
+    }
+  });
 });
 
 test("OAuth uses PKCE S256 and rejects missing/mismatched state", () => {

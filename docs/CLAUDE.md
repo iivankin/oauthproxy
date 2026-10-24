@@ -71,3 +71,7 @@ All routes use the same proxy key. Browser Origin requests are rejected. Files, 
 ## Remote login
 
 With `PROXY_API_KEY` configured, `POST /admin/claude/oauth/start` with `{}` or `{"name":"label"}` returns a flow ID and authorization URL. After signing in, send the displayed `code#state` to `POST /admin/claude/oauth/complete` as `{"flowId":"...","code":"..."}`. The five-minute flow is in memory. The response contains safe account metadata; credentials stay in `accounts.json`.
+
+Refresh failures retain credentials unless HTTP 400/401 confirms `invalid_grant` without `error_description: account_on_hold`. Holds and other failures are retried on later requests or refresh ticks; only a terminal grant rejection requires login. Disabled records from older versions are not automatically re-enabled.
+
+`DELETE /admin/{claude|codex|chatgpt}/accounts/{url-encoded-id}` requires the proxy key and returns 204, or 404 if absent. The dashboard asks for confirmation. This removes local credentials and future routing access, not provider consent, active streams/WS connections, statistics or CAS history. Reconnect via OAuth to add the account again.

@@ -48,6 +48,20 @@ export class Accounts {
     return { id: account.id, name: account.name, email: account.email, clientId: account.clientId };
   }
 
+  async remove(id: string) {
+    const removed = await this.store.update(data => {
+      const index = data.accounts.findIndex(account => account.id === id);
+      if (index < 0) return false;
+      data.accounts.splice(index, 1);
+      return true;
+    });
+    if (removed) {
+      this.modelCache.delete(id);
+      this.limitedUntil.delete(id);
+    }
+    return removed;
+  }
+
   async token(id: string, rejectedToken?: string): Promise<Account> {
     const current = (await this.store.read()).accounts.find(a => a.id === id);
     if (!current || current.disabled) throw new Error("Account missing or disabled; sign in again");

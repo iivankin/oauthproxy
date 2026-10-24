@@ -196,6 +196,12 @@ test("admin start and callback completion save credentials without returning sec
     expect(text).not.toContain(secret);
   expect((await post("/admin/chatgpt/oauth/complete", { flowId: start.flowId, callbackUrl })).status).toBe(404);
   expect((await f.accounts.status())).toHaveLength(1);
+  const account = (await f.store.read()).accounts[0]!;
+  await f.accounts.catalog();
+  const deleted = await admin.handle(new Request(`http://localhost/admin/chatgpt/accounts/${account.id}`, { method: "DELETE" }));
+  expect(deleted.status).toBe(204);
+  expect((await f.store.read()).accounts).toHaveLength(0);
+  await expect(f.accounts.token(account.id)).rejects.toThrow();
 });
 
 test("sharing SSE stays on its durable binding, passes ordinary errors, then rebinds only after confirmed quota", async () => {

@@ -54,7 +54,8 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts, 
     claude.status().then(rows => rows.map((account): DashboardAccount => ({
       provider: "Claude", id: account.id, name: account.name, identity: account.email,
       tier: account.subscriptionType ? subscriptionTier(account.subscriptionType) : undefined,
-      status: account.disabled ? "Disabled" : "error" in account ? "Quota unavailable" : "Connected",
+      status: account.disabled ? "Login required" : "error" in account
+        ? account.error === "Account on hold" ? "Account on hold" : "Quota unavailable" : "Connected",
       quotas: account.usage ? Object.entries(account.usage).flatMap(([label, value]) => {
         const parsed = z.object({ utilization: z.number().finite().nullable(), resets_at: z.string().nullable(), locked_reason: z.string().nullish() }).safeParse(value);
         if (!parsed.success) return [];

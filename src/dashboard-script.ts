@@ -27,6 +27,25 @@ export const dashboardScript = `(() => {
   });
   const accountLabel = data => data?.account?.email || data?.account?.name || "Account connected";
 
+  for (const button of document.querySelectorAll(".delete-account")) {
+    button.addEventListener("click", async () => {
+      if (!token || button.disabled) return;
+      if (!confirm("Delete " + button.dataset.accountLabel + " from this proxy?")) return;
+      busy = true;
+      button.disabled = true;
+      const output = byId("account-action-status");
+      output.textContent = "";
+      try {
+        await request("/admin/" + button.dataset.provider + "/accounts/" + encodeURIComponent(button.dataset.accountId), { method: "DELETE" });
+        location.reload();
+      } catch (error) {
+        output.textContent = error.message;
+        button.disabled = false;
+        busy = false;
+      }
+    });
+  }
+
   const modelsButton = byId("models-toggle");
   const modelsList = byId("models-list");
   let modelsLoaded = false;

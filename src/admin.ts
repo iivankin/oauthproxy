@@ -57,6 +57,17 @@ export class AdminApi {
   async handle(request: Request) {
     const url = new URL(request.url);
     try {
+      const deletion = request.method === "DELETE" && url.pathname.match(/^\/admin\/(claude|codex|chatgpt)\/accounts\/([^/]+)$/);
+      if (deletion) {
+        const providers = { claude: this.claude, codex: this.codex, chatgpt: this.chatgpt };
+        const provider = providers[deletion[1] as keyof typeof providers];
+        if (!provider) return jsonError(503, "Provider unavailable");
+        let id: string;
+        try { id = decodeURIComponent(deletion[2]!); }
+        catch { return jsonError(400, "Invalid account ID"); }
+        if (!await provider.remove(id)) return jsonError(404, "Account not found");
+        return new Response(null, { status: 204, headers: { "cache-control": "no-store" } });
+      }
       if (request.method === "POST" && url.pathname === "/admin/claude/oauth/start") {
         const input = await body(request, nameSchema);
         const login = createLogin(OAUTH.manualRedirect);
@@ -138,8 +149,8 @@ export class AdminApi {
         "OAuth callback has no matching issued client ID", "OAuth account identity changed",
         "ChatGPT plan usage was not authorized"].includes(error.message))
         return jsonError(400, error.message);
-      console.warn("Admin OAuth operation failed");
-      return jsonError(502, "OAuth operation failed");
+      console.warn("Admin operation failed");
+      return jsonError(502, "Admin operation failed");
     }
   }
 }

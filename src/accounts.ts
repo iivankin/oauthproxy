@@ -62,7 +62,10 @@ export class Accounts {
         Object.assign(account, await this.transport.refresh(account));
         return account;
       } catch (error) {
-        if (error instanceof UpstreamError && (error.code === "invalid_grant" || error.status === 401))
+        // Like Claude Code, distinguish a revoked grant from account holds and
+        // generic 401s. A subscription/billing hold must not permanently freeze credentials.
+        if (error instanceof UpstreamError && [400, 401].includes(error.status) &&
+          error.code === "invalid_grant" && !error.accountOnHold)
           account.disabled = true;
         // Return the error so the disabled flag is committed before throwing.
         return error instanceof Error ? error : new Error("Token refresh failed");
@@ -70,6 +73,23 @@ export class Accounts {
     });
     if (result instanceof Error) throw result;
     return result;
+  }
+
+  async remove(id: string) {
+    const removed = await this.store.update(data => {
+      const index = data.accounts.findIndex(account => account.id === id);
+      if (index < 0) return false;
+      data.accounts.splice(index, 1);
+      return true;
+    });
+    if (removed) {
+      this.usageCache.delete(id);
+      this.profileCache.delete(id);
+      this.modelsCache.delete(id);
+      this.cooldown.delete(id);
+      this.modelCooldown.delete(id);
+    }
+    return removed;
   }
 
   private async authenticated(id: string, send: (account: Account) => Promise<Response>) {
@@ -237,7 +257,8 @@ export class Accounts {
       catch (error) {
         const profile = await this.profile(account.id).catch(() => null);
         console.warn(`Cannot load quota for ${account.id}: ${error instanceof Error ? error.message : "unknown error"}`);
-        return { ...safeAccount(account), usage: null, error: "Cannot load quota; account excluded from selection",
+        return { ...safeAccount(account), usage: null, error: error instanceof UpstreamError && error.accountOnHold
+          ? "Account on hold" : "Cannot load quota; account excluded from selection",
           subscriptionType: profile?.organization.organization_type ?? null,
           rateLimitTier: profile?.organization.rate_limit_tier ?? null,
           seatTier: profile?.organization.seat_tier ?? null };
@@ -267,7 +288,10 @@ export class Accounts {
         const accounts = (await this.store.read()).accounts.filter(account => !account.disabled && account.expiresAt < Date.now() + 60_000);
         for (const account of accounts) {
           try { await this.token(account.id); }
-          catch { console.error(`Token refresh failed for ${account.id}; retry on next tick/request`); }
+          catch (error) {
+            const detail = error instanceof UpstreamError ? error.message : "request or storage error";
+            console.error(`Token refresh failed for ${account.id}: ${detail}`);
+          }
         }
       } catch { console.error("Cannot read account store during refresh"); }
       finally { running = false; }
