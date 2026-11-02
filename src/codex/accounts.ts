@@ -4,6 +4,7 @@ import { Transport, UpstreamError } from "./transport.ts";
 import { accountFromTokens, catalogSchema, usageSchema, type Account, type Catalog, type Tokens, type Usage } from "./schema.ts";
 import { dirname, join } from "node:path";
 import { SessionBindings } from "../session-bindings.ts";
+import { resetCreditsSchema, consumeResetResultSchema, type ConsumeReset } from "./resets.ts";
 
 export class SelectionError extends Error {}
 const permanentRefreshCodes = new Set(["invalid_grant", "refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated"]);
@@ -110,6 +111,19 @@ export class Accounts {
     const value = catalogSchema.parse(await this.authorized(id, account => this.transport.get(url.toString(), account)));
     this.modelCache.set(id, { at: Date.now(), value });
     return value;
+  }
+
+  async resetCredits(id: string) {
+    return resetCreditsSchema.parse(await this.authorized(id, account =>
+      this.transport.get(this.transport.endpoints.resetCredits, account)));
+  }
+
+  async consumeReset(id: string, input: ConsumeReset) {
+    const result = consumeResetResultSchema.parse(await this.authorized(id, account => this.transport.consumeReset(account, input)));
+    this.invalidateUsage(id);
+    // A confirmed reset removes the local exhaustion cooldown; selection still verifies fresh usage.
+    if (result.code === "reset") this.limitedUntil.delete(id);
+    return result;
   }
 
   async choose(model?: string, sessionId?: string, excluded: ReadonlySet<string> = new Set()) {

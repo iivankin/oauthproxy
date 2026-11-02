@@ -1,3 +1,5 @@
+import { dashboardResetsScript } from "./dashboard-resets.ts";
+
 export const dashboardScript = `(() => {
   const root = document.querySelector("main[data-api-key]");
   const token = root?.dataset.apiKey || "";
@@ -26,6 +28,8 @@ export const dashboardScript = `(() => {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
   });
   const accountLabel = data => data?.account?.email || data?.account?.name || "Account connected";
+
+  ${dashboardResetsScript}
 
   for (const button of document.querySelectorAll(".delete-account")) {
     button.addEventListener("click", async () => {

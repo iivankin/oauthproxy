@@ -1,5 +1,6 @@
 import { CODEX_VERSION, CLIENT_ID, ENDPOINTS, authHeaders, responsesHeaders, type Endpoints } from "./profile.ts";
 import { tokensSchema, type Account } from "./schema.ts";
+import type { ConsumeReset } from "./resets.ts";
 
 export class UpstreamError extends Error {
   constructor(readonly status: number, readonly body: Uint8Array, readonly headers: Headers) {
@@ -33,6 +34,13 @@ export class Transport {
   }
 
   get(url: string, account: Account) { return this.request(url, { headers: authHeaders(account, this.version) }); }
+
+  consumeReset(account: Account, input: ConsumeReset) {
+    return this.request(`${this.endpoints.resetCredits}/consume`, {
+      method: "POST", headers: { ...authHeaders(account, this.version), "content-type": "application/json" },
+      body: JSON.stringify(input),
+    });
+  }
 
   async responses(account: Account, body: string, incoming: Headers, sessionId: string, signal: AbortSignal) {
     const response = await fetch(this.endpoints.responsesHttp, {

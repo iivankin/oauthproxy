@@ -79,4 +79,15 @@ Encrypted reasoning and compaction items pass through unchanged. Cross-account p
 
 Admission uses `rate_limit.allowed`, not rounded usage percentages. Unknown quota is unavailable. Usage is cached for 30 seconds, models for five minutes. Reset credits and reserve are never activated automatically.
 
+### Manual usage resets
+
+Expand **Usage resets** on a Codex account in `/dashboard`, select a credit and click **Apply reset**. Confirmation is required. Counts come from usage; expanding loads current credit details from OpenAI.
+
+Authenticated admin routes (require `PROXY_API_KEY`):
+
+- `GET /admin/codex/accounts/<local-id>/reset-credits`: `{credits, available_count}`.
+- `POST /admin/codex/accounts/<local-id>/reset-credits/consume`: JSON `{"credit_id":"<id>","redeem_request_id":"<UUID>"}`.
+
+Results: `reset`, `nothing_to_reset`, `no_credit`, or `already_redeemed`, plus `windows_reset`. On timeout or an unknown outcome, retry with the **same** `redeem_request_id`. The dashboard retains it in session storage until a known result. A confirmed reset clears the local exhaustion cooldown; the next request verifies fresh quota. Follow-up usage retrieval is separate from consumption.
+
 Protocol reference: [openai/codex](https://github.com/openai/codex/tree/30fc6864cc1318121eca1843c217fe00ce1212f1/codex-rs). Local mock tests cover transport and auth; live Codex login/inference has not been verified.

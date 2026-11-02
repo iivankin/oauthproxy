@@ -6,6 +6,8 @@ import { OAUTH } from "./transport.ts";
 import { finishDeviceLogin, startDeviceLogin, type DeviceLogin } from "./codex/oauth.ts";
 import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
 import { begin as beginChatGPT, callbackCode, complete as completeChatGPT, type Login as ChatGPTLogin } from "./chatgpt/oauth.ts";
+import { consumeResetSchema } from "./codex/resets.ts";
+import { UpstreamError } from "./codex/transport.ts";
 
 const nameSchema = z.object({ name: z.string().trim().min(1).max(100).optional() }).strict();
 const completeSchema = z.object({ flowId: z.uuid(), code: z.string().min(1).max(4096) }).strict();
@@ -57,6 +59,22 @@ export class AdminApi {
   async handle(request: Request) {
     const url = new URL(request.url);
     try {
+      const resets = url.pathname.match(/^\/admin\/codex\/accounts\/([^/]+)\/reset-credits(\/consume)?$/);
+      if (resets && (request.method === "GET" && !resets[2] || request.method === "POST" && resets[2])) {
+        let id: string;
+        try { id = decodeURIComponent(resets[1]!); }
+        catch { return jsonError(400, "Invalid account ID"); }
+        if (!(await this.codex.status()).some(account => account.id === id)) return jsonError(404, "Account not found");
+        const input = resets[2] ? await body(request, consumeResetSchema) : undefined;
+        try {
+          const result = input ? await this.codex.consumeReset(id, input) : await this.codex.resetCredits(id);
+          return Response.json(result, { headers: { "cache-control": "no-store" } });
+        } catch (error) {
+          if (error instanceof UpstreamError)
+            return jsonError(error.status, `Reset credits request failed (upstream HTTP ${error.status})`);
+          return jsonError(502, "Reset credits request failed; retry consumption with the same redeem_request_id");
+        }
+      }
       const deletion = request.method === "DELETE" && url.pathname.match(/^\/admin\/(claude|codex|chatgpt)\/accounts\/([^/]+)$/);
       if (deletion) {
         const providers = { claude: this.claude, codex: this.codex, chatgpt: this.chatgpt };

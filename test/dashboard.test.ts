@@ -12,7 +12,7 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   await f.accounts.store.update(data => { data.accounts[0]!.name = '<script>alert("secret")</script>'; });
   f.usage.set("Bearer a-access", { rate_limit: { allowed: true, limit_reached: false,
     primary_window: { used_percent: 100, limit_window_seconds: 18000, reset_at: 1800000000 } },
-    email: "codex@test.invalid", plan_type: "prolite" });
+    email: "codex@test.invalid", plan_type: "prolite", rate_limit_reset_credits: { available_count: 3 } });
   const response = await fetch(`${f.url}dashboard`);
   expect(response.status).toBe(200);
   expect(response.headers.get("content-type")).toContain("text/html");
@@ -24,6 +24,8 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
   expect(html).toContain("codex@test.invalid");
   expect(html).toContain("Max");
   expect(html).toContain("Pro Lite");
+  expect(html).toContain("Usage resets: 3");
+  expect(html).toContain("Apply reset");
   expect(html).toContain("Bearer local-key");
   expect(html).toContain("POST /v1/messages");
   expect(html).toContain("POST /v1/responses (SSE)");
@@ -54,6 +56,19 @@ test("dashboard is public, escapes metadata, and shows only the configured clien
     expect(html).not.toContain(secret);
   expect((await fetch(`${f.url}codex/accounts`)).status).toBe(401);
   expect((await fetch(`${f.url}v1/responses`, { method: "POST" })).status).toBe(401);
+});
+
+test("malformed optional reset metadata does not hide Codex quota", async () => {
+  const f = await setup();
+  f.usage.set("Bearer a-access", { rate_limit: { allowed: true, limit_reached: false,
+    primary_window: { used_percent: 42, limit_window_seconds: 18000 } },
+    rate_limit_reset_credits: { available_count: "unknown" } });
+  const html = await (await fetch(`${f.url}dashboard`)).text();
+  expect(html).toContain("42%");
+  expect(html).toContain("Usage resets: —");
+  expect(html).not.toContain("Quota unavailable");
+  const inline = html.match(/<script>([\s\S]*?)<\/script>/)![1]!;
+  expect(() => new Function(inline)).not.toThrow();
 });
 
 test("dashboard shows per-account HTTP attempts and WS sessions without counting page views", async () => {

@@ -4,11 +4,12 @@ import type { Accounts as CodexAccounts } from "./codex/accounts.ts";
 import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
 import type { Usage as CodexUsage } from "./codex/schema.ts";
 import type { Provider } from "./stats.ts";
+import { resetSummarySchema } from "./codex/resets.ts";
 
 export type Quota = { label: string; used: number | null; resets: string | null; blocked?: boolean };
 export type DashboardAccount = {
   provider: Provider; id: string; name: string; identity: string;
-  status: string; tier?: string; quotas: Quota[];
+  status: string; tier?: string; quotas: Quota[]; resetCredits?: number;
 };
 const windowSchema = z.object({
   used_percent: z.number().finite().nullable().optional(),
@@ -69,6 +70,8 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts, 
       if (account.disabled) return row;
       try {
         const usage = await codex.usage(account.id);
+        const resets = resetSummarySchema.safeParse(usage.rate_limit_reset_credits);
+        if (resets.success) row.resetCredits = resets.data.available_count;
         const identity = codexIdentitySchema.safeParse(usage);
         if (identity.success && identity.data.email) row.identity = identity.data.email;
         if (identity.success && identity.data.plan_type) row.tier = subscriptionTier(identity.data.plan_type);

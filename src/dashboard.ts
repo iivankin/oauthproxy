@@ -17,10 +17,13 @@ function quota(row: Quota) {
     ${row.resets ? `<small>Resets ${escape(date(row.resets))}</small>` : ""}</div>`;
 }
 function account(row: DashboardAccount, canDelete: boolean) {
+  const resets = row.provider === "Codex" ? `<details class="reset-credits" data-account-id="${escape(row.id)}" data-account-label="${escape(row.identity || row.name)}"${canDelete && row.status !== "Disabled" ? "" : ' data-disabled="true"'}>
+    <summary>Usage resets: ${row.resetCredits ?? "—"}</summary><select aria-label="Usage reset" hidden></select>
+    <button type="button" disabled>Apply reset</button><output aria-live="polite"></output></details>` : "";
   return `<tr><td><strong>${escape(row.name)}</strong><small>${escape(row.identity)}</small></td>
     <td>${row.provider}</td><td>${escape(row.tier ?? "—")}</td><td><span class="status ${row.status === "Connected" ? "ok" : ""}">${escape(row.status)}</span></td>
     <td class="quotas">${row.quotas.map(quota).join("") || (row.provider === "ChatGPT"
-      ? '<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">ChatGPT Usage</a>' : "—")}</td>
+      ? '<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noreferrer">ChatGPT Usage</a>' : "—")}${resets}</td>
     <td><button type="button" class="delete-account" data-provider="${row.provider.toLowerCase()}" data-account-id="${escape(row.id)}" data-account-label="${escape(row.identity || row.name)}"${canDelete ? "" : " disabled"}>Delete</button></td></tr>`;
 }
 
@@ -72,6 +75,7 @@ small,.muted{display:block;color:#94a0a9;font-size:12px;line-height:1.6}header s
 .oauth{display:grid;grid-template-columns:1fr 1fr;gap:28px}.oauth section{border-top:1px solid #293035;padding-top:16px}.oauth h3{font-size:13px;font-weight:550;margin:0 0 14px}.oauth label{display:block;color:#94a0a9;font-size:11px;text-transform:uppercase;letter-spacing:.05em;margin:12px 0 6px}.oauth input{width:100%;border:1px solid #374047;border-radius:4px;background:#151a1d;color:#e6eaed;padding:9px 10px;font:inherit}.actions{display:flex;align-items:center;gap:10px;margin-top:12px}.oauth button{border:1px solid #486052;border-radius:4px;background:#1b2821;color:#c4ddd0;padding:8px 12px;font:inherit;cursor:pointer}.oauth button:disabled{opacity:.45;cursor:default}.oauth a{padding:7px 11px}.oauth output{display:block;min-height:20px;margin-top:10px;color:#a4d1b9;font-size:12px}.oauth output.error{color:#d8b783}.device-code{display:inline-block;margin-top:12px;font-size:18px;letter-spacing:.08em}
 .model-heading{display:flex;align-items:center;gap:16px}.model-heading h2{margin-right:auto}.model-heading button{border:1px solid #486052;border-radius:4px;background:#1b2821;color:#c4ddd0;padding:8px 12px;font:inherit;cursor:pointer}.model-group{border-top:1px solid #293035;padding:14px 0}.model-group h3{font-size:13px;margin:0 0 8px}.model-group code{display:inline-block;margin:0 12px 8px 0}.model-group small{margin:0}
 .delete-account{background:transparent;border:1px solid #674744;color:#dfaaa3;border-radius:4px;padding:6px 10px;font:inherit;cursor:pointer}.delete-account:disabled{opacity:.45;cursor:default}
+.reset-credits{margin-top:14px;font-size:12px}.reset-credits summary{cursor:pointer;color:#b2d6c3}.reset-credits select{display:block;max-width:100%;margin:10px 0;background:#151a1d;color:#e6eaed;padding:6px;border:1px solid #374047}.reset-credits select[hidden]{display:none}.reset-credits button{background:#1b2821;border:1px solid #486052;color:#c4ddd0;border-radius:4px;padding:6px 10px;cursor:pointer}.reset-credits button:disabled{opacity:.45;cursor:default}.reset-credits output{display:block;color:#94a0a9;margin-top:6px}
 @media(max-width:640px){main{padding:24px 16px}.summary{gap:0;justify-content:space-between}.summary strong{font-size:24px}td{padding-right:20px}.quotas{min-width:220px}.examples,.oauth{grid-template-columns:1fr}}
 </style></head><body><main data-api-key="${escape(key ?? "")}">
 <header><div><h1>OAuth Proxy</h1><small>${escape(date(new Date().toISOString()))} · Refreshes every 30s</small></div><a href="/dashboard">Refresh</a></header>
