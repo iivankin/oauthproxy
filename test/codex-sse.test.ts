@@ -1,5 +1,6 @@
 import { afterEach, expect, test } from "bun:test";
 import { gzipSync } from "node:zlib";
+import { request as httpRequest } from "node:http";
 import { fixture } from "./codex-fixture.ts";
 
 const fixtures: Awaited<ReturnType<typeof fixture>>[] = [];
@@ -8,6 +9,28 @@ afterEach(async () => { for (const f of fixtures.splice(0)) await f.close(); });
 const headers = { authorization: "Bearer local-key", "content-type": "application/json", "session-id": "sse-session" };
 const body = JSON.stringify({ model: "test-model", input: [{ role: "user", content: "Hi" }], stream: true, store: false });
 const encode = (text: string) => new TextEncoder().encode(text);
+
+test("HTTP forwards bodies beyond the old WS-sized cap without restoring Bun's default cap", async () => {
+  const f = await setup();
+  const raw = JSON.stringify({ model: "test-model", input: [{ role: "user", content: "x".repeat(33 * 1024 * 1024) }],
+    stream: true, store: false });
+  const response = await fetch(`${f.url}v1/responses`, { method: "POST", headers, body: raw });
+  expect(response.status).toBe(200);
+  expect(await response.text()).toContain("response.completed");
+  expect(f.calls.find(call => call.path === "/responses")?.body).toBe(raw);
+
+  // Content-Length admission runs before auth. No body is sent for this oversized declaration.
+  const status = await new Promise<number | undefined>((resolve, reject) => {
+    const request = httpRequest(`${f.url}v1/responses`, { method: "POST", agent: false,
+      headers: { "content-length": 1024 * 1024 * 1024, connection: "close" } }, response => {
+      response.resume();
+      response.on("end", () => resolve(response.statusCode));
+    });
+    request.on("error", reject);
+    request.end();
+  });
+  expect(status).toBe(401);
+});
 
 test("native HTTP SSE delivers the first event before EOF, retaining raw request and response bytes", async () => {
   const f = await setup();

@@ -32,7 +32,8 @@ export function serve(accounts: Accounts, hostname = "127.0.0.1", port = 3000, k
   const admin = new AdminApi(accounts, codex, chatgpt);
   const claude = handler(accounts, key, stats);
   const server = Bun.serve<SocketRelay>({
-    hostname, port, idleTimeout: 0, maxRequestBodySize: MAX_PAYLOAD,
+    // Omitting this option restores Bun's default 128 MiB cap; Infinity disables it.
+    hostname, port, idleTimeout: 0, maxRequestBodySize: Infinity,
     async fetch(request, server) {
       const url = new URL(request.url);
       const path = url.pathname;

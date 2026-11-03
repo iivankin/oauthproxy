@@ -59,7 +59,7 @@ Wait for `response.completed`, then send its `response.id` as `previous_response
 
 Each HTTP request uses the durable session/model binding while its account remains eligible. Send full context each time: affinity does not restore WebSocket response state. The request body and SSE bytes are forwarded unchanged, including opaque reasoning, compaction and unknown events.
 
-HTTP errors retain status/body/retry headers. HTTP 401 triggers one refresh/retry on the same account. Confirmed quota exhaustion can transparently retry full input without `previous_response_id` before any bytes are forwarded, once per account. Generic 429, 5xx, refusals and errors after streaming starts are not replayed. Canceling the client request cancels upstream. Require a terminal event; HTTP 200 or EOF alone does not prove success. Maximum request body: 32 MiB; upstream request timeout: 10 minutes.
+HTTP errors retain status/body/retry headers. HTTP 401 triggers one refresh/retry on the same account. Confirmed quota exhaustion can transparently retry full input without `previous_response_id` before any bytes are forwarded, once per account. Generic 429, 5xx, refusals and errors after streaming starts are not replayed. Canceling the client request cancels upstream. Require a terminal event; HTTP 200 or EOF alone does not prove success. The proxy does not impose an HTTP request-body size limit; ingress and upstream limits still apply. Upstream request timeout: 10 minutes.
 
 ## Errors and state
 
