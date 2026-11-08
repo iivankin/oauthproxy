@@ -68,6 +68,12 @@ Account switches do not transfer previous-response IDs. Cross-account portabilit
 
 All routes use the same proxy key. Browser Origin requests are rejected. Files, batches and token-counting endpoints are not implemented.
 
+## Usage resets
+
+`GET /admin/claude/accounts/{id}/reset-credits` lists manual resets. `POST` to the same path plus `/consume` with `{"credit_id":"<offer-id>","redeem_request_id":"<uuid>"}` applies one. Both require the proxy key. The dashboard offers the same controls and shows reset times in the browser's local timezone.
+
+The proxy checks current eligibility before applying a reset. Cedar grants and Juniper's weekly 5-hour reset are supported; Juniper requires `arm: "reset"`. Resets are never spent automatically. After an ambiguous failure, retry with the same UUID; Cedar retains that operation for ten minutes. A successful reset refreshes cached quota and routing cooldowns.
+
 ## Remote login
 
 With `PROXY_API_KEY` configured, `POST /admin/claude/oauth/start` with `{}` or `{"name":"label"}` returns a flow ID and authorization URL. After signing in, send the displayed `code#state` to `POST /admin/claude/oauth/complete` as `{"flowId":"...","code":"..."}`. The five-minute flow is in memory. The response contains safe account metadata; credentials stay in `accounts.json`.

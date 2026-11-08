@@ -1,4 +1,5 @@
 import { dashboardResetsScript } from "./dashboard-resets.ts";
+import { dashboardTimeScript } from "./dashboard-time.ts";
 
 export const dashboardScript = `(() => {
   const root = document.querySelector("main[data-api-key]");
@@ -29,6 +30,7 @@ export const dashboardScript = `(() => {
   });
   const accountLabel = data => data?.account?.email || data?.account?.name || "Account connected";
 
+  ${dashboardTimeScript}
   ${dashboardResetsScript}
 
   for (const button of document.querySelectorAll(".delete-account")) {

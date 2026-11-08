@@ -2,7 +2,9 @@ import { z } from "zod";
 import type { Accounts } from "./accounts.ts";
 import type { Accounts as CodexAccounts } from "./codex/accounts.ts";
 import { createLogin, validateCode } from "./oauth.ts";
-import { OAUTH } from "./transport.ts";
+import { OAUTH, UpstreamError as ClaudeUpstreamError } from "./transport.ts";
+import { AppError } from "./schema.ts";
+import { claudeConsumeSchema } from "./claude-reset-schema.ts";
 import { finishDeviceLogin, startDeviceLogin, type DeviceLogin } from "./codex/oauth.ts";
 import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
 import { begin as beginChatGPT, callbackCode, complete as completeChatGPT, type Login as ChatGPTLogin } from "./chatgpt/oauth.ts";
@@ -59,19 +61,25 @@ export class AdminApi {
   async handle(request: Request) {
     const url = new URL(request.url);
     try {
-      const resets = url.pathname.match(/^\/admin\/codex\/accounts\/([^/]+)\/reset-credits(\/consume)?$/);
-      if (resets && (request.method === "GET" && !resets[2] || request.method === "POST" && resets[2])) {
+      const resets = url.pathname.match(/^\/admin\/(claude|codex)\/accounts\/([^/]+)\/reset-credits(\/consume)?$/);
+      if (resets && (request.method === "GET" && !resets[3] || request.method === "POST" && resets[3])) {
         let id: string;
-        try { id = decodeURIComponent(resets[1]!); }
+        try { id = decodeURIComponent(resets[2]!); }
         catch { return jsonError(400, "Invalid account ID"); }
-        if (!(await this.codex.status()).some(account => account.id === id)) return jsonError(404, "Account not found");
-        const input = resets[2] ? await body(request, consumeResetSchema) : undefined;
+        const claude = resets[1] === "claude";
+        const account = claude ? (await this.claude.store.read()).accounts.find(account => account.id === id) : undefined;
+        if (claude ? !account : !(await this.codex.status()).some(account => account.id === id))
+          return jsonError(404, "Account not found");
+        const input = resets[3] ? await body(request, claude ? claudeConsumeSchema : consumeResetSchema) : undefined;
         try {
-          const result = input ? await this.codex.consumeReset(id, input) : await this.codex.resetCredits(id);
+          const result = claude
+            ? input ? await this.claude.resets.consume(id, input, account!.organizationId) : await this.claude.resets.list(id)
+            : input ? await this.codex.consumeReset(id, input) : await this.codex.resetCredits(id);
           return Response.json(result, { headers: { "cache-control": "no-store" } });
         } catch (error) {
-          if (error instanceof UpstreamError)
-            return jsonError(error.status, `Reset credits request failed (upstream HTTP ${error.status})`);
+          if (error instanceof AppError) return jsonError(error.status, error.message);
+          if (error instanceof UpstreamError || error instanceof ClaudeUpstreamError)
+            return jsonError(error.status >= 400 ? error.status : 502, `Reset credits request failed (upstream HTTP ${error.status})`);
           return jsonError(502, "Reset credits request failed; retry consumption with the same redeem_request_id");
         }
       }

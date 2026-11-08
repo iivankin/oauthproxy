@@ -8,16 +8,16 @@ import type { Stats } from "./stats.ts";
 const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 function date(value: string) {
   const parsed = new Date(value);
-  return Number.isFinite(parsed.getTime()) ? parsed.toISOString().replace("T", " ").slice(0, 16) + " UTC" : "Unknown";
+  return Number.isFinite(parsed.getTime()) ? `<time datetime="${parsed.toISOString()}">…</time>` : "Unknown";
 }
 function quota(row: Quota) {
   const percent = row.used === null ? "—" : `${Math.round(row.used * 10) / 10}%`;
   return `<div class="quota"><div class="quota-label"><span>${escape(row.label)}</span><span>${percent}${row.blocked ? " · Limited" : ""}</span></div>
     ${row.used === null ? "" : `<progress class="${row.blocked ? "limited" : ""}" max="100" value="${Math.max(0, Math.min(100, row.used))}" aria-label="${escape(row.label)} used"></progress>`}
-    ${row.resets ? `<small>Resets ${escape(date(row.resets))}</small>` : ""}</div>`;
+    ${row.resets ? `<small>Resets ${date(row.resets)}</small>` : ""}</div>`;
 }
 function account(row: DashboardAccount, canDelete: boolean) {
-  const resets = row.provider === "Codex" ? `<details class="reset-credits" data-account-id="${escape(row.id)}" data-account-label="${escape(row.identity || row.name)}"${canDelete && row.status !== "Disabled" ? "" : ' data-disabled="true"'}>
+  const resets = row.provider !== "ChatGPT" ? `<details class="reset-credits" data-provider="${row.provider.toLowerCase()}" data-account-id="${escape(row.id)}" data-account-label="${escape(row.identity || row.name)}"${canDelete && !["Disabled", "Login required"].includes(row.status) ? "" : ' data-disabled="true"'}>
     <summary>Usage resets: ${row.resetCredits ?? "—"}</summary><select aria-label="Usage reset" hidden></select>
     <button type="button" disabled>Apply reset</button><output aria-live="polite"></output></details>` : "";
   return `<tr><td><strong>${escape(row.name)}</strong><small>${escape(row.identity)}</small></td>
@@ -78,7 +78,7 @@ small,.muted{display:block;color:#94a0a9;font-size:12px;line-height:1.6}header s
 .reset-credits{margin-top:14px;font-size:12px}.reset-credits summary{cursor:pointer;color:#b2d6c3}.reset-credits select{display:block;max-width:100%;margin:10px 0;background:#151a1d;color:#e6eaed;padding:6px;border:1px solid #374047}.reset-credits select[hidden]{display:none}.reset-credits button{background:#1b2821;border:1px solid #486052;color:#c4ddd0;border-radius:4px;padding:6px 10px;cursor:pointer}.reset-credits button:disabled{opacity:.45;cursor:default}.reset-credits output{display:block;color:#94a0a9;margin-top:6px}
 @media(max-width:640px){main{padding:24px 16px}.summary{gap:0;justify-content:space-between}.summary strong{font-size:24px}td{padding-right:20px}.quotas{min-width:220px}.examples,.oauth{grid-template-columns:1fr}}
 </style></head><body><main data-api-key="${escape(key ?? "")}">
-<header><div><h1>OAuth Proxy</h1><small>${escape(date(new Date().toISOString()))} · Refreshes every 30s</small></div><a href="/dashboard">Refresh</a></header>
+<header><div><h1>OAuth Proxy</h1><small>${date(new Date().toISOString())} · Refreshes every 30s</small></div><a href="/dashboard">Refresh</a></header>
 <div class="summary"><div><small>Accounts</small><strong>${accounts.length}</strong></div><div><small>HTTP requests / WS sessions</small><strong>${sum("total")}</strong></div><div><small>Active</small><strong>${sum("active")}</strong></div><div><small>Errors</small><strong>${sum("errors")}</strong></div></div>
 ${errors.map(error => `<p class="error">${escape(error)}</p>`).join("")}
 <h2>Accounts &amp; quotas</h2><output id="account-action-status" class="error" aria-live="polite"></output><div class="table"><table><thead><tr><th>Account</th><th>Provider</th><th>Plan</th><th>Status</th><th>Quota used</th><th>Actions</th></tr></thead><tbody>
@@ -110,7 +110,7 @@ GET /codex/v1/models      GET /codex/accounts
 GET /codex/usage?account=&lt;id&gt;
 GET /chatgpt/v1/models    GET /chatgpt/accounts
 WS  /v1/responses         WS  /chatgpt/v1/responses</code></pre>
-<footer><small>Since ${escape(date(stats.since.toISOString()))} · In memory · Per-account attempts<br>HTTP: completed 2xx streams, non-2xx / transport errors. WS: connections, not model turns. In-stream model errors are not counted.</small></footer>
+<footer><small>Since ${date(stats.since.toISOString())} · In memory · Per-account attempts<br>HTTP: completed 2xx streams, non-2xx / transport errors. WS: connections, not model turns. In-stream model errors are not counted.</small></footer>
 </main><script>${dashboardScript}</script></body></html>`, { headers: {
     "content-type": "text/html; charset=utf-8", "cache-control": "no-store, no-transform",
     "x-content-type-options": "nosniff", "referrer-policy": "no-referrer",

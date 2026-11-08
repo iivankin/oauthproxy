@@ -117,6 +117,16 @@ export class Transport {
     return this.response(this.client(account).get(path, { timeout: 15_000 }).asResponse());
   }
 
+  limitReset(account: Tokens, path: string, body?: Record<string, string>) {
+    // Reset eligibility is surface-sensitive: the Agent SDK User-Agent gets "surface" refusals.
+    return this.fetcher(`${this.origin}${path}`, {
+      method: body ? "POST" : "GET", redirect: "error",
+      headers: { authorization: `Bearer ${account.accessToken}`, "anthropic-beta": "oauth-2025-04-20",
+        "user-agent": "claude-cli/2.1.319 (external, cli)", "content-type": "application/json" },
+      body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(body ? 25_000 : 5_000),
+    });
+  }
+
   nativeMessage(account: Tokens, wire: NativeMessage, signal: AbortSignal) {
     return this.fetcher(`${this.origin}/v1/messages${wire.search}`, {
       method: "POST", body: wire.body, headers: nativeHeaders(wire.headers, account.accessToken),

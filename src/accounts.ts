@@ -7,6 +7,7 @@ import { previousHistoryHash } from "./history.ts";
 import { dirname, join } from "node:path";
 import { SessionBindings } from "./session-bindings.ts";
 import type { NativeMessage } from "./claude-request.ts";
+import { ClaudeResets } from "./claude-resets.ts";
 
 type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
 type MessageHints = { usageLimit?: UsageLimitMode; gatewayPromptId?: string };
@@ -20,8 +21,15 @@ export class Accounts {
   private modelCooldown = new Map<string, Map<string, Cooldown>>();
 
   readonly bindings: SessionBindings;
+  readonly resets: ClaudeResets;
   constructor(readonly store = new AccountStore(), readonly transport = new Transport()) {
     this.bindings = new SessionBindings(join(dirname(store.path), ".session-bindings"), "claude");
+    this.resets = new ClaudeResets((id, path, body) => this.authenticated(id,
+      account => this.transport.limitReset(account, path, body)).then(jsonResponse), id => {
+      this.usageCache.delete(id);
+      this.cooldown.delete(id);
+      this.modelCooldown.delete(id);
+    });
   }
 
   async add(tokens: Tokens, name?: string) {
@@ -43,6 +51,7 @@ export class Accounts {
     this.modelsCache.delete(id);
     this.cooldown.delete(id);
     this.modelCooldown.delete(id);
+    this.resets.forget(id);
     return safeAccount(account);
   }
 
@@ -88,6 +97,7 @@ export class Accounts {
       this.modelsCache.delete(id);
       this.cooldown.delete(id);
       this.modelCooldown.delete(id);
+      this.resets.forget(id);
     }
     return removed;
   }
