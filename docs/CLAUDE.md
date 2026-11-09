@@ -21,6 +21,8 @@ Set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` to load the proxy's catalog i
 
 Other clients, including Agent SDK, use `@anthropic-ai/sdk` with retries disabled. This path adds a billing line to `system`, selected-account metadata and CAS previous-message diagnostics, replacing any caller billing block. It does not inject an agent identity prompt, built-in tools, email context or title generation.
 
+The SDK profile follows Claude Code **2.1.321**, Agent SDK **0.3.321** and HTTP SDK **0.128.0**. Its defaults include `tool-provenance-2026-10-26`; the generated prompt UUID is shared by the billing line and `x-claude-code-prompt-id`. `x-claude-code-sandy-plover` lists tool names used in the supplied history, bounded to 64 entries / 7168 bytes. Compacted or truncated lists carry the native incomplete-list marker. The proxy does not invent filesystem/MCP provenance, tool durations, prompt/turn counters, project attribution or pre-compaction harness state. Native CLI supplies those unchanged. Runtime headers describe the actual proxy runtime.
+
 On the SDK path only, absent explicit cache settings, it adds one-hour markers to the custom system tail and last eligible message block. The billing line stays uncached. Explicit cache settings are preserved.
 
 ## Responses
@@ -42,7 +44,7 @@ The proxy retries only:
 - Once after HTTP 401, following token refresh.
 - On confirmed subscription quota exhaustion, using another eligible account.
 
-`x-should-retry: false` disables retries. A generic 429, 5xx, refusal or SSE error does not trigger account switching. Quota detection requires HTTP 429, unified `rejected` status, a known exhausted window and no allowed overage. Each account is tried at most once before forwarding a response. Once SSE starts, its original errors are returned without replay. The proxy never enables paid extra usage.
+`x-should-retry: false` disables retries. A generic 429, 5xx, refusal or SSE error does not trigger account switching. Quota detection requires HTTP 429, unified `rejected` status, a known exhausted window and no allowed overage. `anthropic-ratelimit-unified-overage-in-use: true` also prevents rotation. Each account is tried at most once before forwarding a response. Once SSE starts, its original errors are returned without replay. The proxy never enables paid extra usage.
 
 Clients decide whether to retry other failures, respecting `Retry-After` / `retry-after-ms`. There is no request deduplication: retrying an ambiguous network failure may generate another response.
 
@@ -56,7 +58,7 @@ Clients send the conversation history on every request. The proxy does not store
 
 On the SDK path, `.claude-proxy-cas/` maps account/session/history hashes to response IDs. Records use content-addressed JSON objects and refs, private permissions, checksums and atomic writes. Only completed responses are recorded. A disk failure warns and keeps the mapping in memory; crash recovery is then not guaranteed. CAS has no automatic cleanup. Native CLI manages its own diagnostics; the proxy does not parse its response stream into CAS records.
 
-Compaction blocks are forwarded unchanged. The last non-empty summary becomes the hash root, so removing the compacted prefix does not change the lookup key. Keep the required compaction beta and strategy on subsequent requests.
+Compaction blocks are forwarded unchanged. A streaming `compaction_delta` replaces the summary and opaque metadata; `content: null` means compaction failed. The last non-empty summary becomes the hash root, so removing the compacted prefix does not change the lookup key. Keep the required compaction beta and strategy on subsequent requests.
 
 Account switches do not transfer previous-response IDs. Cross-account portability of encrypted thinking, signed compaction and server-side resources is not guaranteed. The proxy does not strip reasoning or repair rejected signatures. Use a single-account pool if account continuity is required.
 

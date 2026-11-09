@@ -20,6 +20,9 @@ function quotaWindows(usage: Usage, model: string, mode?: UsageLimitMode) {
 export function exhaustedQuota(response: Response): "account" | "model" | undefined {
   const h = response.headers;
   if (response.status !== 429) return;
+  // Native CLI treats this as active paid usage even if subscription windows
+  // are rejected. A 429 on that path isn't proof the account quota is exhausted.
+  if (h.get("anthropic-ratelimit-unified-overage-in-use") === "true") return;
   const slow = h.get("anthropic-ratelimit-unified-slow-status");
   // A slow-lane capacity miss is deliberately retried by Claude Code on the
   // same account. Rotating here would lose the server-side allowance state.

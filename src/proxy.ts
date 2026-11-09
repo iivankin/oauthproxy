@@ -70,7 +70,7 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
         ? (id: string) => accounts.nativeMessage(id, submission.wire, signal)
         : (id: string) => accounts.message(id, submission.input, sessionId, promptId,
           [...(submission.input.betas ?? []), ...(request.headers.get("anthropic-beta") ?? "").split(",")].map(s => s.trim()).filter(Boolean), signal,
-          { ...(usageLimit && { usageLimit }), ...(gatewayPromptId && { gatewayPromptId }) });
+          { ...(usageLimit && { usageLimit }) });
       let id: string;
       try { id = await accounts.choose(submission.model, excluded, chooseOptions); }
       catch (error) {

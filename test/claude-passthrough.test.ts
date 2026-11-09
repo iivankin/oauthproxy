@@ -71,6 +71,10 @@ test("native JSON, query, billing, metadata, CCH and application headers pass un
   const original = { "anthropic-beta": "client-beta,client-beta", "anthropic-version": "2023-06-01",
     "x-app": "cli", "x-stainless-package-version": "native-sdk", "x-claude-code-request-class": "auxiliary",
     "x-claude-code-agent-id": "agent", "x-claude-code-parent-agent-id": "parent",
+    "x-claude-code-sandy-plover": '[{"name":"Bash","directory_entry":"caller-value"}]',
+    "x-claude-code-prev-tool-durations": "Bash=123",
+    "x-cc-atis-current": "native-value", "anthropic-dispatch-id": "dispatch-value",
+    "anthropic-thinking-prefix-mismatch": "native-value", "x-claude-code-hook-deny": "native-value",
     "x-claude-code-prompt-id": "opaque-prompt", "x-client-request-id": "original-request", "anthropic-usage-limit": "future-mode" };
   const response = await f.run(f.request(wire, { ...original, "x-api-key": "proxy-key", host: "wrong.invalid",
     connection: "keep-alive, x-private-hop", "x-private-hop": "remove" }));
@@ -109,7 +113,7 @@ test("Agent SDK requests still get SDK preparation rather than native forwarding
     messages: [{ role: "user", content: "hi" }] }), { "user-agent": "claude-cli/2.1.303 (external, sdk-ts, agent-sdk/0.3.303)" }));
   expect(response.status).toBe(200);
   const sent = f.calls[0]!;
-  expect(sent.headers.get("user-agent")).toContain("agent-sdk/0.3.285");
+  expect(sent.headers.get("user-agent")).toContain("agent-sdk/0.3.321");
   expect(sent.headers.get("anthropic-beta")).toContain("oauth-2025-04-20");
   expect(JSON.parse(new TextDecoder().decode(sent.body)).system[0].text).toContain("cc_entrypoint=sdk-ts;");
 });

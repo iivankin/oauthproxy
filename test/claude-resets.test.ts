@@ -62,7 +62,7 @@ test("Claude reset routes protect credentials and use native CLI headers only fo
   expect(list.available_count).toBe(3);
   expect(list.credits.map((credit: { id: string }) => credit.id)).toEqual(["cedar_ember:test_grant", "juniper_tide"]);
   expect(f.calls[0]!.url.search).toBe("?at_wall=1&skip_spend=1");
-  expect(f.calls[0]!.headers.get("user-agent")).toBe("claude-cli/2.1.319 (external, cli)");
+  expect(f.calls[0]!.headers.get("user-agent")).toBe("claude-cli/2.1.321 (external, cli)");
   expect(f.calls[0]!.headers.get("anthropic-beta")).toBe("oauth-2025-04-20");
   expect(f.calls[0]!.headers.get("authorization")).toBe("Bearer a-access");
   await f.accounts.usage("a");

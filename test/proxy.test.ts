@@ -109,16 +109,21 @@ describe("account routing and quota", () => {
     expect(headers?.get("authorization")).toBe("Bearer b");
     expect(headers?.has("x-api-key")).toBe(false);
     expect(headers?.get("anthropic-beta")).toContain("test-beta");
+    expect(headers?.get("anthropic-beta")).toContain("tool-provenance-2026-10-26");
     expect(forwarded?.tools).toEqual(tools);
     expect(forwarded?.messages).toEqual([{ role: "user", content: [{ type: "text", text: "Hello", cache_control: { type: "ephemeral", ttl: "1h" } }] }]);
     expect(forwarded?.betas).toBeUndefined();
     expect(forwarded?.system).toEqual([expect.objectContaining({ text: expect.stringContaining("cc_entrypoint=sdk-ts;") }),
       { type: "text", text: "Custom instructions", cache_control: { type: "ephemeral", ttl: "1h" } }]);
-    expect(headers?.get("x-stainless-package-version")).toBe("0.112.1");
-    expect(headers?.get("user-agent")).toContain("sdk-ts, agent-sdk/0.3.285");
+    expect(headers?.get("x-stainless-package-version")).toBe("0.128.0");
+    expect(headers?.get("user-agent")).toContain("sdk-ts, agent-sdk/0.3.321");
     expect(headers?.get("x-app")).toBe("cli");
     expect(headers?.get("x-claude-code-request-class")).toBe("main");
     expect(headers?.get("x-client-request-id")).toMatch(/^[0-9a-f-]{36}$/);
+    const promptId = headers?.get("x-claude-code-prompt-id");
+    expect(promptId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(JSON.stringify(forwarded?.system)).toContain(`cc_prompt_id=${promptId};`);
+    expect(headers?.get("x-claude-code-sandy-plover")).toBe("[]");
     expect(response.headers.get("x-claude-code-session-id")).toBeTruthy();
   });
 
@@ -241,6 +246,7 @@ describe("account routing and quota", () => {
     expect(classify({ "retry-after": "5000" })).toBeUndefined();
     expect(classify({ "anthropic-ratelimit-unified-overage-disabled-reason": "out_of_credits" })).toBeUndefined();
     expect(classify({ ...quotaHeaders, "anthropic-ratelimit-unified-overage-status": "allowed" })).toBeUndefined();
+    expect(classify({ ...quotaHeaders, "anthropic-ratelimit-unified-overage-in-use": "true" })).toBeUndefined();
     expect(classify({ ...quotaHeaders, "anthropic-ratelimit-unified-representative-claim": "overage" })).toBeUndefined();
     expect(classify({ "anthropic-ratelimit-unified-status": "rejected", "anthropic-ratelimit-unified-7d-status": "rejected" })).toBe("account");
     const headers = { ...quotaHeaders, "anthropic-ratelimit-unified-representative-claim": "seven_day_overage_included",
@@ -253,6 +259,25 @@ describe("account routing and quota", () => {
     accounts.limited("a", new Headers(headers), "claude-fable-5");
     expect(await accounts.choose(input.model)).toBe("a");
     await expect(accounts.choose("claude-fable-5")).rejects.toThrow("No account has quota");
+  });
+
+  test("active overage 429s pass through without rotating or cooling down the account", async () => {
+    let attempts = 0;
+    const body = '{"type":"error","error":{"type":"rate_limit_error","message":"paid path"}}';
+    const accounts = await setup(async (url, init) => {
+      const control = controlPlane(url, init);
+      if (control) return control;
+      attempts++;
+      return new Response(body, { status: 429, headers: { ...quotaHeaders,
+        "anthropic-ratelimit-unified-overage-in-use": "true" } });
+    });
+    const response = await handler(accounts)(makeRequest());
+    expect(response.status).toBe(429);
+    expect(await response.text()).toBe(body);
+    expect(response.headers.get("anthropic-ratelimit-unified-overage-in-use")).toBe("true");
+    expect(attempts).toBe(1);
+    expect(await accounts.choose(input.model, new Set(["a"]))).toBe("b");
+    expect(await accounts.choose(input.model, new Set(["b"]))).toBe("a");
   });
 
   test("slow-lane capacity waits stay on the client instead of rotating accounts", async () => {
@@ -431,7 +456,7 @@ test("OAuth uses PKCE S256 and rejects missing/mismatched state", () => {
 });
 
 test("billing fingerprint matches capture and previous request stays within account/session", async () => {
-  expect(fingerprint({ ...input, messages: [{ role: "user", content: "Perform the verification job now." }] })).toBe("0c7");
+  expect(fingerprint({ ...input, messages: [{ role: "user", content: "Perform the verification job now." }] })).toBe("8b4");
   const billings: string[] = [];
   const diagnostics: unknown[] = [];
   let sequence = 0;
@@ -547,12 +572,14 @@ test("CLI system-role messages and new beta fields pass through unchanged", asyn
     { role: "system", content: [{ type: "text", text: "Runtime context", cache_control: { type: "ephemeral" } }] },
   ];
   const response = await handler(accounts)(makeRequest({ ...input, messages,
-    safeguards: { mode: "test" }, output_config: { effort: "low" } },
+    safeguards: { mode: "test" }, output_config: { effort: "low" }, speed: "fast", thread: { type: "create" } },
   { "anthropic-beta": "mid-conversation-system-2026-04-07" }));
   expect(response.status).toBe(200);
   expect(forwarded?.messages).toEqual(messages);
   expect(forwarded?.safeguards).toEqual({ mode: "test" });
   expect(forwarded?.output_config).toEqual({ effort: "low" });
+  expect(forwarded?.speed).toBe("fast");
+  expect(forwarded?.thread).toEqual({ type: "create" });
   expect(headers?.get("anthropic-beta")).toContain("mid-conversation-system-2026-04-07");
 });
 

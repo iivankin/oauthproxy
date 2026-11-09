@@ -3,7 +3,8 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Stream } from "@anthropic-ai/sdk/core/streaming";
 import type { MessageCreateParamsBase } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { messageSchema, tokensSchema, type Account, type Tokens, type Message } from "./schema.ts";
-import { BASE_BETAS, USER_AGENT, prepareBody } from "./profile.ts";
+import { BASE_BETAS, CLI_USER_AGENT, USER_AGENT, prepareBody } from "./profile.ts";
+import { toolsUsedHeader } from "./tools-used.ts";
 import { signBody } from "./signing.ts";
 import { relayMessage } from "./message-stream.ts";
 import { HistoryStore } from "./history-store.ts";
@@ -122,7 +123,7 @@ export class Transport {
     return this.fetcher(`${this.origin}${path}`, {
       method: body ? "POST" : "GET", redirect: "error",
       headers: { authorization: `Bearer ${account.accessToken}`, "anthropic-beta": "oauth-2025-04-20",
-        "user-agent": "claude-cli/2.1.319 (external, cli)", "content-type": "application/json" },
+        "user-agent": CLI_USER_AGENT, "content-type": "application/json" },
       body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(body ? 25_000 : 5_000),
     });
   }
@@ -135,7 +136,7 @@ export class Transport {
   }
 
   async message(account: Account, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal,
-    hints: { usageLimit?: UsageLimitMode; gatewayPromptId?: string } = {}) {
+    hints: { usageLimit?: UsageLimitMode } = {}) {
     const previous = await this.history.get(sessionId, account.id, previousHistoryHash(input.messages));
     const body = prepareBody(input, { account, sessionId, promptId, previousRequestId: previous?.requestId, previousMessageId: previous?.messageId });
     // The proxy validates the envelope but preserves arbitrary API content/tool
@@ -144,10 +145,11 @@ export class Transport {
     const upstream = new AbortController();
     const hintHeaders = {
       ...(hints.usageLimit && { "anthropic-usage-limit": hints.usageLimit }),
-      ...(hints.gatewayPromptId && { "x-claude-code-prompt-id": hints.gatewayPromptId }),
+      "x-claude-code-prompt-id": promptId,
+      "x-claude-code-sandy-plover": toolsUsedHeader(input.messages),
     };
     const operation = this.client(account, sessionId).beta.messages.create(params,
-      { signal: AbortSignal.any([signal, upstream.signal]), ...(Object.keys(hintHeaders).length && { headers: hintHeaders }) });
+      { signal: AbortSignal.any([signal, upstream.signal]), headers: hintHeaders });
     const save = async (message: { id: string; content: unknown }, requestId: string | null | undefined) => {
       if (!requestId || !/^req_[A-Za-z0-9_-]{1,36}$/.test(requestId) || !/^msg_[A-Za-z0-9_-]+$/.test(message.id)) return;
       const parsed = messageSchema.shape.messages.element.safeParse({ role: "assistant", content: message.content });

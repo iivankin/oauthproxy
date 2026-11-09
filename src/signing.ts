@@ -3,7 +3,7 @@ const EXCLUDED = new Set(["max_tokens", "fallbacks", "fallback_credit_token"]);
 const SEED = 0x4D659218E32A3268n;
 
 // Current protocol reference: CLIProxyAPI/internal/runtime/executor/claude_signing.go.
-// Verified against both native 2.1.280 captures (81109, 087ba). This operates on
+// Verified against native 2.1.280 and 2.1.321 captures. This operates on
 // the SDK's canonical JSON.stringify output, not arbitrary hand-formatted JSON.
 function hashView(value: Json): string {
   if (Array.isArray(value)) return `[${value.map(hashView).join(",")}]`;

@@ -17,7 +17,8 @@ test("SDK assembles split SSE, tools, thinking and compaction; ping/unknown even
   const wire = sse("ping", { type: "ping" }) + start()
     + block(0, { type: "compaction", content: "" })
     + delta(0, { type: "compaction_delta", content: "sum" })
-    + delta(0, { type: "compaction_delta", content: "mary", encrypted_content: "opaque" }) + stop(0)
+    // SDK 0.128.0 treats compaction deltas as complete replacement values.
+    + delta(0, { type: "compaction_delta", content: "summary", encrypted_content: "opaque" }) + stop(0)
     + block(1, { type: "thinking", thinking: "", signature: "" })
     + delta(1, { type: "thinking_delta", thinking: "reason" }) + delta(1, { type: "signature_delta", signature: "signature" }) + stop(1)
     + block(2, { type: "tool_use", id: "tool_first", name: "echo", input: {} })
@@ -47,6 +48,15 @@ test("SDK assembles split SSE, tools, thinking and compaction; ping/unknown even
     { type: "thinking", thinking: "reason", signature: "signature" },
     { type: "tool_use", id: "tool_first", name: "echo", input: { value: "✓" } },
   ]);
+});
+
+test("failed compaction replaces an earlier summary with null instead of persisting stale content", async () => {
+  const wire = start() + block(0, { type: "compaction", content: "old", encrypted_content: "old-opaque" })
+    + delta(0, { type: "compaction_delta", content: null, encrypted_content: null }) + stop(0) + end();
+  let saved: BetaMessage | undefined;
+  const response = relayMessage(new Response(wire), async value => { saved = value; }, new AbortController());
+  expect(await response.text()).toBe(wire);
+  expect(saved?.content).toEqual([{ type: "compaction", content: null, encrypted_content: null }]);
 });
 
 test("signed on-demand compaction is assembled intact without deltas", async () => {

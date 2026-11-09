@@ -10,7 +10,7 @@ import type { NativeMessage } from "./claude-request.ts";
 import { ClaudeResets } from "./claude-resets.ts";
 
 type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
-type MessageHints = { usageLimit?: UsageLimitMode; gatewayPromptId?: string };
+type MessageHints = { usageLimit?: UsageLimitMode };
 type Cooldown = { until: number; reset?: QuotaReset; usage?: Promise<Usage>; models?: Promise<Model[]> };
 
 export class Accounts {
