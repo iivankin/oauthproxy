@@ -85,7 +85,7 @@ export function handler(accounts: Accounts, key?: string, stats = new Stats()) {
         const response = await stats.http("Claude", id, signal, () => send(id));
         const scope = exhaustedQuota(response);
         if (!scope) return forward(response, sessionId, native);
-        accounts.limited(id, response.headers, scope === "model" ? submission.model : undefined);
+        accounts.limited(id, response.headers, scope === "model" ? submission.model : undefined, usageLimit);
         if (response.headers.get("x-should-retry") === "false") return quotaResponse(response);
         // Keep the original rejection until another eligible account is found;
         // a local selection failure must not replace its body. Only a verified

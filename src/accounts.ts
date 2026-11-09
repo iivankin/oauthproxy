@@ -2,7 +2,7 @@ import { randomInt, randomBytes } from "node:crypto";
 import { AccountStore } from "./store.ts";
 import { Transport, UpstreamError, jsonResponse } from "./transport.ts";
 import { AppError, modelsPageSchema, profileSchema, usageSchema, safeAccount, type Tokens, type Usage, type Model, type Account, type Message, type Profile } from "./schema.ts";
-import { hasQuota, quotaReset, responseQuotaReset, retryAt, type QuotaReset, type UsageLimitMode } from "./quota.ts";
+import { hasQuota, quotaReset, responseQuotaClaim, responseQuotaReset, retryAt, type QuotaReset, type UsageLimitMode } from "./quota.ts";
 import { previousHistoryHash } from "./history.ts";
 import { dirname, join } from "node:path";
 import { SessionBindings } from "./session-bindings.ts";
@@ -11,7 +11,15 @@ import { ClaudeResets } from "./claude-resets.ts";
 
 type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
 type MessageHints = { usageLimit?: UsageLimitMode };
-type Cooldown = { until: number; reset?: QuotaReset; usage?: Promise<Usage>; models?: Promise<Model[]> };
+type Cooldown = { until: number; mode?: UsageLimitMode; claim?: string; reset?: QuotaReset; usage?: Promise<Usage>; models?: Promise<Model[]> };
+
+function activeCooldown(entry: Cooldown | undefined, mode?: UsageLimitMode, now = Date.now()): entry is Cooldown {
+  if (!entry || entry.until <= now) return false;
+  // Grace is admitted by the server separately from normal subscription quota.
+  if (mode === "extended" || entry.mode === "extended") return mode === entry.mode;
+  // Low-priority bypasses only the session window, never the weekly limit.
+  return mode !== "slow" || entry.mode === "slow" || entry.claim !== "five_hour";
+}
 
 export class Accounts {
   private usageCache = new Map<string, { until: number; value: Promise<Usage> }>();
@@ -191,8 +199,8 @@ export class Accounts {
     let failed = false;
     let preferredFailed = false;
     const candidates = await Promise.all(accounts.map(async account => {
-      if ((this.cooldown.get(account.id)?.until ?? 0) > Date.now()) return null;
-      if ((this.modelCooldown.get(account.id)?.get(model)?.until ?? 0) > Date.now()) return null;
+      if (activeCooldown(this.cooldown.get(account.id), options.usageLimit)) return null;
+      if (activeCooldown(this.modelCooldown.get(account.id)?.get(model), options.usageLimit)) return null;
       try {
         const usage = await this.usage(account.id);
         if (account.id === options.preferredId && [usage.five_hour, usage.seven_day].some(window =>
@@ -211,8 +219,8 @@ export class Accounts {
     return eligible[randomInt(eligible.length)]!;
   }
 
-  limited(id: string, headers: Headers, model?: string) {
-    const entry: Cooldown = { until: retryAt(headers), reset: responseQuotaReset(headers),
+  limited(id: string, headers: Headers, model?: string, mode?: UsageLimitMode) {
+    const entry: Cooldown = { until: retryAt(headers), mode, claim: responseQuotaClaim(headers), reset: responseQuotaReset(headers),
       usage: this.usageCache.get(id)?.value, models: this.modelsCache.get(id)?.value };
     if (model) {
       const windows = this.modelCooldown.get(id) ?? new Map<string, Cooldown>();
@@ -228,7 +236,7 @@ export class Accounts {
     for (const account of (await this.store.read()).accounts.filter(item => !item.disabled)) {
       // Use observations from selection; no extra network calls on the error path.
       const cooldowns = [this.cooldown.get(account.id), this.modelCooldown.get(account.id)?.get(model)]
-        .filter((entry): entry is Cooldown => !!entry && entry.until > now);
+        .filter(entry => activeCooldown(entry, mode, now));
       const models = this.modelsCache.get(account.id);
       // Selection skips cooling accounts, so the ordinary catalog TTL can expire
       // without a refresh. Retain the last verified catalog with the rejection.

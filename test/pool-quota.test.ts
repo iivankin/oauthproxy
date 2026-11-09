@@ -46,6 +46,36 @@ test("reset uses the last blocking window, requested model and usage-limit mode"
   expect(quotaReset({ ...limits, seven_day: { ...window(100, hour), locked_reason: "policy" } }, model, undefined, now)).toBeUndefined();
   expect(quotaReset({ ...limits, five_hour: window(null, hour) }, model, undefined, now)).toBeUndefined();
   expect(responseQuotaReset(new Headers({ "retry-after": "123" }), now)).toBeUndefined();
+  expect(responseQuotaReset(new Headers({ "anthropic-ratelimit-unified-representative-claim": "five_hour",
+    "anthropic-ratelimit-unified-slow-status": "weekly_limit", "anthropic-ratelimit-unified-reset": String((now + hour) / 1000) }), now))
+    .toEqual({ at: now + hour, claim: "seven_day" });
+});
+
+test("normal quota cooldowns still allow grace and session-limited slow requests", async () => {
+  for (const claim of ["five_hour", "seven_day"]) {
+    let current = usage();
+    const accounts = await setup(async url => new URL(url).pathname === "/api/oauth/usage"
+      ? Response.json(current) : Response.json({ data: [{ id: model }] }), ["a"]);
+    expect(await accounts.choose(model)).toBe("a");
+    current = { ...usage(), [claim]: window(100, hour) };
+    const headers = new Headers({ "anthropic-ratelimit-unified-status": "rejected",
+      "anthropic-ratelimit-unified-representative-claim": claim,
+      "anthropic-ratelimit-unified-reset": String((now + hour) / 1000) });
+    accounts.limited("a", headers);
+    await expect(accounts.choose(model)).rejects.toThrow("No account has quota");
+    expect(await accounts.choose(model, new Set(), { usageLimit: "extended" })).toBe("a");
+    expect(await accounts.poolQuotaReset(model, "extended")).toBeUndefined();
+    if (claim === "five_hour") {
+      expect(await accounts.choose(model, new Set(), { usageLimit: "slow" })).toBe("a");
+      expect(await accounts.poolQuotaReset(model, "slow")).toBeUndefined();
+    } else await expect(accounts.choose(model, new Set(), { usageLimit: "slow" })).rejects.toThrow("No account has quota");
+    // A rejection of grace itself must stop grace retries, without creating a
+    // blanket account cooldown for normal requests after their quota refills.
+    accounts.limited("a", headers, undefined, "extended");
+    await expect(accounts.choose(model, new Set(), { usageLimit: "extended" })).rejects.toThrow("No account has quota");
+    current = usage();
+    expect(await accounts.choose(model)).toBe("a");
+  }
 });
 
 test("local pool rejection advertises min(account max resets), excluding disabled and unsupported models", async () => {

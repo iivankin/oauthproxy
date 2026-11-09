@@ -47,8 +47,9 @@ function controlPlane(url: string | URL, init?: RequestInit) {
 test("gateway model discovery serves the Claude catalog on both authenticated routes", async () => {
   let attempts = 0;
   const model = { id: input.model, type: "model", display_name: "Haiku", created_at: "2025-10-01T00:00:00Z" };
-  const accounts = await setup(async url => {
+  const accounts = await setup(async (url, init) => {
     expect(new URL(url).pathname).toBe("/v1/models");
+    expect(new Headers(init?.headers).get("anthropic-beta")).toBe("oauth-2025-04-20");
     attempts++;
     return Response.json({ data: [model], has_more: false });
   });
@@ -280,21 +281,25 @@ describe("account routing and quota", () => {
     expect(await accounts.choose(input.model, new Set(["b"]))).toBe("a");
   });
 
-  test("slow-lane capacity waits stay on the client instead of rotating accounts", async () => {
-    let attempts = 0;
-    const accounts = await setup(async (url, init) => {
-      const control = controlPlane(url, init);
-      if (control) return control;
-      attempts++;
-      return Response.json({ type: "error", error: { type: "rate_limit_error", message: "capacity" } }, {
-        status: 429, headers: { ...quotaHeaders, "anthropic-ratelimit-unified-slow-status": "slot_busy",
-          "anthropic-ratelimit-unified-slow-retry-after": "20" },
+  test("slow-lane capacity and allowance errors stay on the client without cooling normal requests", async () => {
+    for (const slow of ["slot_busy", "budget_exhausted"]) {
+      let attempts = 0;
+      const accounts = await setup(async (url, init) => {
+        const control = controlPlane(url, init);
+        if (control) return control;
+        attempts++;
+        return Response.json({ type: "error", error: { type: "rate_limit_error", message: "capacity" } }, {
+          status: 429, headers: { ...quotaHeaders, "anthropic-ratelimit-unified-slow-status": slow,
+            "anthropic-ratelimit-unified-slow-retry-after": "20" },
+        });
       });
-    });
-    const response = await handler(accounts)(makeRequest(input, { "anthropic-usage-limit": "slow" }));
-    expect(response.status).toBe(429);
-    expect(response.headers.get("anthropic-ratelimit-unified-slow-status")).toBe("slot_busy");
-    expect(attempts).toBe(1);
+      const response = await handler(accounts)(makeRequest(input, { "anthropic-usage-limit": "slow" }));
+      expect(response.status).toBe(429);
+      expect(response.headers.get("anthropic-ratelimit-unified-slow-status")).toBe(slow);
+      expect(attempts).toBe(1);
+      expect(await accounts.choose(input.model, new Set(["a"]))).toBe("b");
+      expect(await accounts.choose(input.model, new Set(["b"]))).toBe("a");
+    }
   });
 
   test("completed history pins later turns to the same randomly selected account", async () => {

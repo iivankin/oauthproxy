@@ -23,6 +23,8 @@ Other clients, including Agent SDK, use `@anthropic-ai/sdk` with retries disable
 
 The SDK profile follows Claude Code **2.1.321**, Agent SDK **0.3.321** and HTTP SDK **0.128.0**. Its defaults include `tool-provenance-2026-10-26`; the generated prompt UUID is shared by the billing line and `x-claude-code-prompt-id`. `x-claude-code-sandy-plover` lists tool names used in the supplied history, bounded to 64 entries / 7168 bytes. Compacted or truncated lists carry the native incomplete-list marker. The proxy does not invent filesystem/MCP provenance, tool durations, prompt/turn counters, project attribution or pre-compaction harness state. Native CLI supplies those unchanged. Runtime headers describe the actual proxy runtime.
 
+Inference betas are sent only on Messages requests. Quota, profile and model discovery use only `oauth-2025-04-20`; the model endpoint rejects inference-only flags.
+
 On the SDK path only, absent explicit cache settings, it adds one-hour markers to the custom system tail and last eligible message block. The billing line stays uncached. Explicit cache settings are preserved.
 
 ## Responses
@@ -37,7 +39,9 @@ Upstream status, error bodies, request IDs, retry/quota/refusal headers and unkn
 
 The first request randomly selects an account with verified quota and model access. A durable `(provider, session, model)` binding pins later turns, including after a restart and compaction. The CAS separately supplies previous-message diagnostics on the SDK path. Confirmed quota exhaustion can switch the turn to another eligible account. Quota and models are cached for five minutes.
 
-`extended` lets Anthropic decide whether an in-progress turn has a short grace window across its normal usage boundary. `slow` may cross the session limit but still requires weekly quota. Slow-lane `slot_busy` responses are returned to the client with their retry headers instead of rotating accounts.
+`extended` lets Anthropic decide whether an in-progress turn has a short grace window across its normal usage boundary. `slow` may cross the session limit but still requires weekly quota. Slow-lane `slot_busy` and `budget_exhausted` responses are returned to the client without rotating or cooling the account. Claude Code waits for capacity or disables low-priority, respectively; `weekly_limit` still means subscription exhaustion.
+
+A normal quota cooldown does not block `extended`, or `slow` when only the session window is exhausted. A rejection of `extended` cools that mode separately from normal requests.
 
 The proxy retries only:
 

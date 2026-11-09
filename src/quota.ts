@@ -24,10 +24,10 @@ export function exhaustedQuota(response: Response): "account" | "model" | undefi
   // are rejected. A 429 on that path isn't proof the account quota is exhausted.
   if (h.get("anthropic-ratelimit-unified-overage-in-use") === "true") return;
   const slow = h.get("anthropic-ratelimit-unified-slow-status");
-  // A slow-lane capacity miss is deliberately retried by Claude Code on the
-  // same account. Rotating here would lose the server-side allowance state.
-  if (slow === "slot_busy") return;
-  if (slow === "weekly_limit" || slow === "budget_exhausted") return "account";
+  // Claude Code waits for slot_busy and disables low-priority on budget_exhausted.
+  // Neither establishes exhaustion of the account's normal subscription quota.
+  if (slow === "slot_busy" || slow === "budget_exhausted") return;
+  if (slow === "weekly_limit") return "account";
   if (h.get("anthropic-ratelimit-unified-status") !== "rejected") return;
   // Subscription exhaustion with allowed extra usage is not a quota rejection
   // of this request. Generic RPM/TPM 429s and credits_required alone aren't proof.
@@ -65,14 +65,22 @@ export function quotaReset(usage: Usage, model: string, mode?: UsageLimitMode, n
   return latest;
 }
 
-export function responseQuotaReset(headers: Headers, now = Date.now()): QuotaReset | undefined {
+export function responseQuotaClaim(headers: Headers): string | undefined {
+  // A confirmed weekly block also prevents slow mode, even when the header's
+  // representative claim still names the session window.
+  if (headers.get("anthropic-ratelimit-unified-7d-status") === "rejected" ||
+    headers.get("anthropic-ratelimit-unified-slow-status") === "weekly_limit") return "seven_day";
   let claim = headers.get("anthropic-ratelimit-unified-representative-claim") ?? "";
   if (!sharedClaims.has(claim) && !modelClaims.has(claim)) {
-    if (headers.get("anthropic-ratelimit-unified-7d-status") === "rejected" ||
-      headers.get("anthropic-ratelimit-unified-slow-status") === "weekly_limit") claim = "seven_day";
-    else if (headers.get("anthropic-ratelimit-unified-5h-status") === "rejected") claim = "five_hour";
+    if (headers.get("anthropic-ratelimit-unified-5h-status") === "rejected") claim = "five_hour";
     else return;
   }
+  return claim;
+}
+
+export function responseQuotaReset(headers: Headers, now = Date.now()): QuotaReset | undefined {
+  const claim = responseQuotaClaim(headers);
+  if (!claim) return;
   const resets = ["anthropic-ratelimit-unified-reset", "anthropic-ratelimit-unified-slow-budget-reset"]
     .map(name => Number(headers.get(name)) * 1000).filter(at => Number.isFinite(at) && at > now);
   // Retry-After is a retry delay, not evidence of a subscription reset.

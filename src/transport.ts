@@ -3,7 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { Stream } from "@anthropic-ai/sdk/core/streaming";
 import type { MessageCreateParamsBase } from "@anthropic-ai/sdk/resources/beta/messages/messages";
 import { messageSchema, tokensSchema, type Account, type Tokens, type Message } from "./schema.ts";
-import { BASE_BETAS, CLI_USER_AGENT, USER_AGENT, prepareBody } from "./profile.ts";
+import { BASE_BETAS, CLI_USER_AGENT, OAUTH_BETA, USER_AGENT, prepareBody } from "./profile.ts";
 import { toolsUsedHeader } from "./tools-used.ts";
 import { signBody } from "./signing.ts";
 import { relayMessage } from "./message-stream.ts";
@@ -79,7 +79,8 @@ export class Transport {
         return this.fetcher(target, { ...init, headers, body, redirect: "error" });
       },
       defaultHeaders: { "user-agent": USER_AGENT, ...(sessionId && { "X-Claude-Code-Session-Id": sessionId }),
-        "anthropic-beta": BASE_BETAS.join(","), "x-app": "cli" },
+        // Inference betas belong to messages.create; /v1/models rejects some of them.
+        "anthropic-beta": OAUTH_BETA, "x-app": "cli" },
     });
   }
 
@@ -122,7 +123,7 @@ export class Transport {
     // Reset eligibility is surface-sensitive: the Agent SDK User-Agent gets "surface" refusals.
     return this.fetcher(`${this.origin}${path}`, {
       method: body ? "POST" : "GET", redirect: "error",
-      headers: { authorization: `Bearer ${account.accessToken}`, "anthropic-beta": "oauth-2025-04-20",
+      headers: { authorization: `Bearer ${account.accessToken}`, "anthropic-beta": OAUTH_BETA,
         "user-agent": CLI_USER_AGENT, "content-type": "application/json" },
       body: body ? JSON.stringify(body) : undefined, signal: AbortSignal.timeout(body ? 25_000 : 5_000),
     });

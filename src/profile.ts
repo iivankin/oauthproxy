@@ -6,7 +6,8 @@ import { applyCaching } from "./cache.ts";
 export const CLI_VERSION = "2.1.321";
 export const CLI_USER_AGENT = `claude-cli/${CLI_VERSION} (external, cli)`;
 export const USER_AGENT = `claude-cli/${CLI_VERSION} (external, sdk-ts, agent-sdk/0.3.321)`;
-export const BASE_BETAS = ["oauth-2025-04-20", "interleaved-thinking-2025-05-14",
+export const OAUTH_BETA = "oauth-2025-04-20";
+export const BASE_BETAS = [OAUTH_BETA, "interleaved-thinking-2025-05-14",
   "context-management-2025-06-27", "prompt-caching-scope-2026-01-05", "claude-code-20250219",
   "tool-provenance-2026-10-26", "thinking-token-count-2026-05-13",
   "extended-cache-ttl-2025-04-11", "cache-diagnosis-2026-04-07"];
