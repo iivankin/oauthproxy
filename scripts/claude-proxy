@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+: "${ANTHROPIC_BASE_URL:?Set ANTHROPIC_BASE_URL to your proxy URL}"
+: "${CLAUDE_CODE_OAUTH_TOKEN:?Set CLAUDE_CODE_OAUTH_TOKEN to your proxy key}"
+
+# Generic auth/API keys disable Claude Code's subscription features.
+unset ANTHROPIC_AUTH_TOKEN ANTHROPIC_API_KEY
+export CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+
+bun "$(dirname "$0")/claude-discovery.ts"
+
+exec claude "$@"

@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import { SessionBindings } from "./session-bindings.ts";
 import type { NativeMessage } from "./claude-request.ts";
 import { ClaudeResets } from "./claude-resets.ts";
+import { modelFlagSnapshot } from "./claude-flags.ts";
 
 type ChooseOptions = { usageLimit?: UsageLimitMode; preferredId?: string; sessionId?: string };
 type MessageHints = { usageLimit?: UsageLimitMode };
@@ -123,6 +124,14 @@ export class Accounts {
 
   request(id: string, path: string) {
     return this.authenticated(id, account => this.transport.request(account, path));
+  }
+
+  async cliFlags() {
+    const accounts = (await this.store.read()).accounts.filter(account => !account.disabled);
+    if (!accounts.length) throw new AppError(503, "No available Claude accounts");
+    const account = accounts[randomInt(accounts.length)]!;
+    const response = await this.authenticated(account.id, account => this.transport.cliFlags(account));
+    return modelFlagSnapshot(await jsonResponse(response));
   }
 
   message(id: string, input: Message, sessionId: string, promptId: string, betas: string[], signal: AbortSignal,

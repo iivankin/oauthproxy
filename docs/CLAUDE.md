@@ -19,6 +19,10 @@ For Claude Code, set `ANTHROPIC_BASE_URL` to the proxy and `CLAUDE_CODE_OAUTH_TO
 
 Set `CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1` to load the proxy's catalog into `/model`. `--model` is optional; without it, Claude Code uses its saved or default model.
 
+Claude Code 2.1.321's gateway discovery ignores `CLAUDE_CODE_OAUTH_TOKEN`. Run `scripts/claude-proxy` with `ANTHROPIC_BASE_URL` and `CLAUDE_CODE_OAUTH_TOKEN` set. It refreshes the model catalog and model-billing flags before launching the installed `claude` with your arguments. It clears generic API-key/bearer auth, preserves OAuth mode, and respects `CLAUDE_CONFIG_DIR`. Restart an existing CLI process to load the new catalog.
+
+`GET /claude/cli-flags` requires the proxy key. It evaluates flags using a randomly selected enabled account's real OAuth token. The launcher merges only `tengu_saffron_lattice` and `tengu_usage_overage_included_models` into the native config, preserving unrelated settings and experiments. Failed discovery stops the launcher without using stale flags. This is a startup snapshot; another account may have different entitlements, and inference remains subject to upstream checks.
+
 Other clients, including Agent SDK, use `@anthropic-ai/sdk` with retries disabled. This path adds a billing line to `system`, selected-account metadata and CAS previous-message diagnostics, replacing any caller billing block. It does not inject an agent identity prompt, built-in tools, email context or title generation.
 
 The SDK profile follows Claude Code **2.1.321**, Agent SDK **0.3.321** and HTTP SDK **0.128.0**. Its defaults include `tool-provenance-2026-10-26`; the generated prompt UUID is shared by the billing line and `x-claude-code-prompt-id`. `x-claude-code-sandy-plover` lists tool names used in the supplied history, bounded to 64 entries / 7168 bytes. Compacted or truncated lists carry the native incomplete-list marker. The proxy does not invent filesystem/MCP provenance, tool durations, prompt/turn counters, project attribution or pre-compaction harness state. Native CLI supplies those unchanged. Runtime headers describe the actual proxy runtime.

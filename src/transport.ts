@@ -11,6 +11,7 @@ import { HistoryStore } from "./history-store.ts";
 import { historyHash, previousHistoryHash } from "./history.ts";
 import type { UsageLimitMode } from "./quota.ts";
 import { nativeHeaders, type NativeMessage } from "./claude-request.ts";
+import { FLAGS_PATH, flagAttributes } from "./claude-flags.ts";
 
 export type Fetch = (url: string | URL, init?: RequestInit & { decompress?: boolean }) => Promise<Response>;
 export const OAUTH = {
@@ -117,6 +118,15 @@ export class Transport {
 
   request(account: Tokens, path: string) {
     return this.response(this.client(account).get(path, { timeout: 15_000 }).asResponse());
+  }
+
+  cliFlags(account: Account) {
+    return this.fetcher(`${this.origin}${FLAGS_PATH}`, {
+      method: "POST", redirect: "error", signal: AbortSignal.timeout(10_000),
+      headers: { authorization: `Bearer ${account.accessToken}`, "anthropic-beta": OAUTH_BETA,
+        "user-agent": CLI_USER_AGENT, "content-type": "application/json" },
+      body: JSON.stringify(flagAttributes(account)),
+    });
   }
 
   limitReset(account: Tokens, path: string, body?: Record<string, string>) {
