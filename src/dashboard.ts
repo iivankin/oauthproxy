@@ -4,6 +4,7 @@ import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
 import { dashboardAccounts, type DashboardAccount, type Quota } from "./dashboard-data.ts";
 import { dashboardScript } from "./dashboard-script.ts";
 import type { Stats } from "./stats.ts";
+import { tokenUsageSection, tokenUsageStyles } from "./dashboard-token-usage.ts";
 
 const escape = (text: string) => text.replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]!);
 function date(value: string) {
@@ -62,6 +63,7 @@ export async function dashboard(claude: Accounts, codex: CodexAccounts, stats: S
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>OAuth Proxy</title>
 <style>
+${tokenUsageStyles}
 :root{color-scheme:dark;font-family:ui-sans-serif,system-ui,sans-serif;background:#111416;color:#e6eaed;font-size:14px}
 *{box-sizing:border-box}body{margin:0}main{max-width:1120px;margin:auto;padding:44px 28px 64px}
 header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:36px}
@@ -83,6 +85,7 @@ small,.muted{display:block;color:#94a0a9;font-size:12px;line-height:1.6}header s
 ${errors.map(error => `<p class="error">${escape(error)}</p>`).join("")}
 <h2>Accounts &amp; quotas</h2><output id="account-action-status" class="error" aria-live="polite"></output><div class="table"><table><thead><tr><th>Account</th><th>Provider</th><th>Plan</th><th>Status</th><th>Quota used</th><th>Actions</th></tr></thead><tbody>
 ${accounts.map(row => account(row, Boolean(key))).join("") || '<tr><td colspan="6" class="empty">No accounts connected</td></tr>'}</tbody></table></div>
+${tokenUsageSection(accounts)}
 <h2>Traffic</h2><div class="table"><table><thead><tr><th>Account</th><th>Provider</th><th>Transport</th><th>Total</th><th>Active</th><th>Completed</th><th>Errors</th><th>Cancelled</th></tr></thead><tbody>
 ${rows || '<tr><td colspan="8" class="empty">No traffic yet</td></tr>'}</tbody></table></div>
 <h2>Connect account</h2><div class="oauth">

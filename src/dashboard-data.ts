@@ -5,11 +5,13 @@ import type { Accounts as ChatGPTAccounts } from "./chatgpt/accounts.ts";
 import type { Usage as CodexUsage } from "./codex/schema.ts";
 import type { Provider } from "./stats.ts";
 import { resetSummarySchema } from "./codex/resets.ts";
+import type { TokenUsage } from "./codex/token-usage.ts";
 
 export type Quota = { label: string; used: number | null; resets: string | null; blocked?: boolean };
 export type DashboardAccount = {
   provider: Provider; id: string; name: string; identity: string;
   status: string; tier?: string; quotas: Quota[]; resetCredits?: number;
+  tokenUsage?: TokenUsage | null;
 };
 const windowSchema = z.object({
   used_percent: z.number().finite().nullable().optional(),
@@ -68,6 +70,7 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts, 
       const row: DashboardAccount = { provider: "Codex", id: account.id, name: account.name,
         identity: account.accountId, status: account.disabled ? "Disabled" : "Connected", quotas: [] };
       if (account.disabled) return row;
+      const tokenUsage = codex.tokenUsage(account.id);
       try {
         const usage = await codex.usage(account.id);
         const resets = resetSummarySchema.safeParse(usage.rate_limit_reset_credits);
@@ -79,6 +82,7 @@ export async function dashboardAccounts(claude: Accounts, codex: CodexAccounts, 
         if (!usage.rate_limit) row.status = "Quota unavailable";
         else if (!usage.rate_limit.allowed) row.status = "Quota exhausted";
       } catch { row.status = "Quota unavailable"; }
+      row.tokenUsage = await tokenUsage;
       return row;
     }))).catch(() => { errors.push("Codex accounts unavailable"); return []; }),
     chatgpt ? chatgpt.status().then(rows => rows.map((account): DashboardAccount => ({

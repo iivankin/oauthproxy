@@ -10,6 +10,7 @@ export const ENDPOINTS = {
   responsesHttp: "https://chatgpt.com/backend-api/codex/responses",
   models: "https://chatgpt.com/backend-api/codex/models",
   usage: "https://chatgpt.com/backend-api/wham/usage",
+  tokenUsage: "https://chatgpt.com/backend-api/wham/profiles/me",
   resetCredits: "https://chatgpt.com/backend-api/wham/rate-limit-reset-credits",
 };
 export type Endpoints = typeof ENDPOINTS;

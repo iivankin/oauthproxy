@@ -79,6 +79,9 @@ Encrypted reasoning and compaction items pass through unchanged. Cross-account p
 
 Admission uses `rate_limit.allowed`, not rounded usage percentages. Unknown quota is unavailable. Usage is cached for 30 seconds, models for five minutes. Reset credits and reserve are never activated automatically.
 
+The dashboard shows ChatGPT token activity for Codex OAuth accounts from `/backend-api/wham/profiles/me`, cached for five minutes. Daily, weekly and cumulative charts use UTC dates. Profile errors do not affect quota or routing. This is account-wide usage, including requests outside this proxy.
+**All accounts** sums available profiles and daily buckets, with a coverage count. Its peak is the largest combined daily total; longest task is the maximum across accounts. Streaks remain per account.
+
 ### Manual usage resets
 
 Expand **Usage resets** on a Codex account in `/dashboard`, select a credit and click **Apply reset**. Confirmation is required. Counts come from usage; expanding loads current credit details from OpenAI.

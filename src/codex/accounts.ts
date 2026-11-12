@@ -5,6 +5,7 @@ import { accountFromTokens, catalogSchema, usageSchema, type Account, type Catal
 import { dirname, join } from "node:path";
 import { SessionBindings } from "../session-bindings.ts";
 import { resetCreditsSchema, consumeResetResultSchema, type ConsumeReset } from "./resets.ts";
+import { tokenUsageSchema, type TokenUsage } from "./token-usage.ts";
 
 export class SelectionError extends Error {}
 const permanentRefreshCodes = new Set(["invalid_grant", "refresh_token_expired", "refresh_token_reused", "refresh_token_invalidated"]);
@@ -27,6 +28,7 @@ export function usageAllowed(usage: Usage, model?: string) {
 export class Accounts {
   private readonly usageCache = new Map<string, { at: number; value: Usage }>();
   private readonly modelCache = new Map<string, { at: number; value: Catalog }>();
+  private readonly tokenUsageCache = new Map<string, { at: number; value: TokenUsage | null }>();
   private readonly limitedUntil = new Map<string, number>();
   readonly bindings: SessionBindings;
   constructor(readonly store: AccountStore, readonly transport: Transport) {
@@ -45,6 +47,7 @@ export class Accounts {
     });
     this.usageCache.delete(account.id);
     this.modelCache.delete(account.id);
+    this.tokenUsageCache.delete(account.id);
     this.limitedUntil.delete(account.id);
     return { id: account.id, name: account.name, accountId: account.accountId };
   }
@@ -59,6 +62,7 @@ export class Accounts {
     if (removed) {
       this.usageCache.delete(id);
       this.modelCache.delete(id);
+      this.tokenUsageCache.delete(id);
       this.limitedUntil.delete(id);
     }
     return removed;
@@ -111,6 +115,21 @@ export class Accounts {
     const value = catalogSchema.parse(await this.authorized(id, account => this.transport.get(url.toString(), account)));
     this.modelCache.set(id, { at: Date.now(), value });
     return value;
+  }
+
+  async tokenUsage(id: string) {
+    const cached = this.tokenUsageCache.get(id);
+    if (cached && Date.now() - cached.at < (cached.value ? 300_000 : 30_000)) return cached.value;
+    try {
+      const value = tokenUsageSchema.parse(await this.authorized(id, account =>
+        this.transport.get(this.transport.endpoints.tokenUsage, account)));
+      this.tokenUsageCache.set(id, { at: Date.now(), value });
+      return value;
+    } catch {
+      // Profile availability is independent of inference quota and must not disable an account.
+      this.tokenUsageCache.set(id, { at: Date.now(), value: null });
+      return null;
+    }
   }
 
   async resetCredits(id: string) {
